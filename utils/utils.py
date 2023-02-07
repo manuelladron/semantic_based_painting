@@ -141,7 +141,7 @@ def overlay_image_and_mask(image, color_mask, alpha=0.5):
     # Convert the composite image back to 8-bit integers and return it
     return (composite_image * 255).astype(np.uint8)
 
-def process_img(args, img_path, writer, resize_value=128, min_width=600):
+def process_img(args, img_path, writer, resize_value=128, min_width=400):
     """
     Receives image path, opens and resizes it and returns tensor 
     """
@@ -160,8 +160,8 @@ def process_img(args, img_path, writer, resize_value=128, min_width=600):
         if src_img.shape[0] or src_img.shape[1] > 1200:
             new_h = src_img.shape[0] // args.aspect_ratio_downsample
             new_w = src_img.shape[1] // args.aspect_ratio_downsample
-
-        if args.upsample and (new_h < min_width or new_w < min_width): # Adjust it to be at least over 1000 pixels so the painting is not too small 
+        
+        elif args.upsample and (new_h < min_width or new_w < min_width): # Adjust it to be at least over 1000 pixels so the painting is not too small 
             src_img = image_resize(src_img, width=min_width)
             
             if args.salient_mask != '':
@@ -236,26 +236,37 @@ def increase_boundary_thickness(binary_image, kernel_size=3, stride=1, padding=0
     return dilated_image
 
 
-
 # PATCHING UTILITIES -------------- 
 def merge_tensors(tensor_a, tensor_b, indices_a, indices_b):
     """
-    Merges the two tensors given a list of indices corresponding to tensor_a and tensor_b
+    Merges two tensors given a list of indices corresponding to tensor_a and tensor_b
+
+    :param tensor_a: batch tensor with smaller number of tensors
+    :param tensor_b: batch tensor containing all tensors 
+
+    :returns: merged tensor 
     """
-    N, C, H, W = tensor_a.shape
-    M, _, _, _ = tensor_b.shape # all tensors 
+    N, C, H, W = tensor_a.shape # N is a subset of M
+    M, _, _, _ = tensor_b.shape # M is all indices 
+
+    # Create new tensor with all M patches 
     merged_tensor = torch.zeros(M, C, H, W).to(device)
     
+    # Double-check N and M correspond to the lengths of indices_a and indices_b respectively
     assert N == len(indices_a)
     assert (M - N) == len(indices_b)
-
-    for i in range(N):
+    
+    for i in range(N): # 0, 1, 2....
+        # indices_a[i] = 37, 68, 3, 15, ...
+        #print(f'i: {i}, indices_a[i]: {indices_a[i]}')
         merged_tensor[indices_a[i]] = tensor_a[i]
 
     for j in range(M-N):
-        merged_tensor[indices_b[j]] = tensor_b[j]
+        #print(f'j: {j}, indices_b[j]: {indices_b[j]}')
+        merged_tensor[indices_b[j]] = tensor_b[indices_b[j]]
 
     return merged_tensor 
+
 
 def select_tensors_with_n_true(tensor_list, limits_list, N):
     """

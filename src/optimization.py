@@ -169,6 +169,7 @@ def optimization_loop_boundaries(args, src_img, opt_steps, target_patches, prev_
             if args.w_perc > 0:
                 loss_utils.log_losses(logger, 'perc loss', perc_loss, i, opt_steps, level)
 
+    
     return canvas, general_canvas
 
 

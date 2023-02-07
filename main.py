@@ -7,14 +7,14 @@ from src.painter import Painter
 def create_parser():
     parser = argparse.ArgumentParser(description='Stroke Optimization')
 
-    parser.add_argument('--exp_name', type=str, default = 'exp_20_baseline')
+    parser.add_argument('--exp_name', type=str, default = 'exp_21_border')
     
     # strategy settings
     parser.add_argument('--global_loss', type=bool, default = False)
     parser.add_argument('--texturize', type=bool, default = True)
     parser.add_argument('--salient_mask', type=str, default='')
 
-    parser.add_argument('--use_segmentation_mask', type=bool, default = False)
+    parser.add_argument('--use_segmentation_mask', type=bool, default = True)
     parser.add_argument('--paint_by_patches', type=bool, default = True)
 
     parser.add_argument('--start_natural_level', type=int, default = 2)
@@ -30,7 +30,7 @@ def create_parser():
 
     # misc settings 
     parser.add_argument('--upsample', type=bool, default = False)
-    parser.add_argument('--aspect_ratio_downsample', type=float, default=1.5)
+    parser.add_argument('--aspect_ratio_downsample', type=float, default=2)
     parser.add_argument('--image_path', type=str, default = '/home/manuelladron/projects/npp/sigg-asia-imgs/siggraph_asia/buildings/philarm4.jpeg')
     parser.add_argument('--save_dir', type=str, default = './results')
     parser.add_argument('--canvas_size', type=int, default=128)

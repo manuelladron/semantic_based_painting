@@ -217,42 +217,47 @@ class Painter():
         
         # this is used only once 
         if self.args.use_segmentation_mask and level == 1:
-            
-            print(f'\n Initiating boundaries strokes')
-            boundaries_budget = 4
-            boundary_strokes, boundary_indices = utils.init_strokes_boundaries(10, boundaries_budget, device, boundaries_patches_alpha, patches_limits)
-            # boundary_strokes: [4, 45 (len boundary_indices), 13]
-            # boundary_indices: list of integers
-            # boundaries_patches: [total_num_patches, 1, 128, 128]
+            print(f'\n Optimizing contouring strokes')
 
+            # Init strokes 
+            boundaries_budget = 4
+            min_num_pixels_boundary = 10
+            boundary_strokes, boundary_indices = utils.init_strokes_boundaries(min_num_pixels_boundary, boundaries_budget, device, boundaries_patches_alpha, patches_limits)
+            
+            # boundaries_patches: [total_num_patches, 1, 128, 128]
+            # boundary_strokes: [4, 45 (len boundary_indices), 13]
+            # boundary_indices: list of integers with indices corresponding to patches that have boundaries 
+
+            # Create a new optimizer 
             optimizer_b = torch.optim.Adam([boundary_strokes], lr=self.args.lr)
             
-            # To optimize only the position of strokes -> we don't care about colors here yet. 
-            # We can optimize color by using the mask and apply it to the image to get borders with colors  
+            # Generate canvas to optimize (we don't care about previous painting layers, this is just an empty canvas)
             prev_canvas = torch.zeros(self.npatches_total, 3, 128, 128).to(device)  # [npatches, 1, H, W]
 
-            # args, src_img, opt_steps, target_patches, prev_canvas, strokes, budget, brush_size, patches_limits, npatches_w, level, mode, general_canvas, optimizer, renderer, num_params, logger, perc_net, global_loss=False
+            # Optimization loop 
             canvas_boundaries, general_canvas_with_boundaries = opt.optimization_loop_boundaries(self.args, self.src_img, 400, boundaries_patches, prev_canvas, boundary_strokes, boundaries_budget, 
                                                                 brush_size, patches_limits, self.npatches_w, level, mode, self.general_canvas, optimizer_b, 
                                                                 self.renderer, self.num_params, self.logger, self.perc, boundary_indices, global_loss=False) 
         
 
-            # Render boundary strokes on the general canvas:
+            # Render boundary strokes on the previous layer's canvases:
             # boundary_strokes contain less patches than overall canvases, so we first need to select the canvases following indices 
             canvas_selected = torch.index_select(canvas, 0, torch.Tensor(boundary_indices).int().to(device))
+
+            # Update now the selected canvases
             canvas_selected, _, _ = utils.render(canvas_selected, boundary_strokes, boundaries_budget, brush_size, self.renderer, self.num_params)
 
-            # Recompose all canvas -
-            # Generate indices that correspond to the canvases that do not have boundaries 
+            # Recompose all canvases - Generate indices that correspond to the canvases that do not have boundaries 
             total_number_of_indices = canvas.shape[0]
-            indices_no_boundaries = list(set(range(total_number_of_indices))- set(boundary_indices))
+            indices_no_boundaries = list(set(range(total_number_of_indices)) - set(boundary_indices))
+            
             canvas = utils.merge_tensors(canvas_selected, canvas, boundary_indices, indices_no_boundaries)
             
             # Compose all canvases patches into a bigger canavs 
-            self.general_canvas = utils.compose_general_canvas(self.args, canvas, mode, patches_limits, self.npatches_w, self.general_canvas, blendin=True)
+            self.general_canvas = utils.compose_general_canvas(self.args, canvas, 'uniform', patches_limits, self.npatches_w, self.general_canvas, blendin=True)
             self.logger.add_image(f'final_canvas_base_with_boundaries_level_{level}', img_tensor=self.general_canvas.squeeze(0),global_step=0)
 
-
+        
         # Once we have the strokes optimized to approx. the src_img, we can optimize for a style 
         if self.args.add_style:
             # if level > 0:
@@ -280,6 +285,7 @@ class Painter():
             # Add logger 
             self.logger.add_image(f'final_canvas_style_level_{level}', img_tensor=self.general_canvas_style.squeeze(0),global_step=0)
 
+        
         return canvas, base_strokes, canvas_text, canvas_style
 
 
