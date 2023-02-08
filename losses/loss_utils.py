@@ -12,7 +12,7 @@ def log_losses(logger, loss_name, loss, global_step, total_steps, level):
     print(f'{loss_name}: {loss.item()} | {global_step}/{total_steps} done!')
 
 
-def compute_loss(args, perc_net, canvas, target_patches, use_mse = False, use_clip=False):
+def compute_loss(args, perc_net, canvas, target_patches, use_mse = False, use_clip=False, mask=None):
     """
     We do all patches together
     :param canvas: [npatches, 3, 128, 128]
@@ -25,10 +25,18 @@ def compute_loss(args, perc_net, canvas, target_patches, use_mse = False, use_cl
     if use_clip == False:
         
         if use_mse:
-            l1_loss = torch.nn.MSELoss()(canvas, target_patches)
+            if mask != None:
+                l1_loss = torch.nn.MSELoss(reduction='none')(canvas, target_patches) 
+                l1_loss = (l1_loss * mask).mean()
+                
+            else:
+                l1_loss = torch.nn.MSELoss()(canvas, target_patches)
         else:
             # L1 loss 
-            l1_loss = F.l1_loss(canvas, target_patches, reduction='mean')
+            if mask != None:
+                l1_loss = (F.l1_loss(canvas, target_patches, reduction='none') * mask).mean()
+            else:
+                l1_loss = F.l1_loss(canvas, target_patches, reduction='mean')
         loss += l1_loss
         
         # Perc loss 

@@ -100,7 +100,7 @@ def optimization_loop(args, src_img, opt_steps, target_patches, prev_canvas, str
 
 
 
-def optimization_loop_boundaries(args, src_img, opt_steps, target_patches, prev_canvas, strokes, budget, brush_size, patches_limits, npatches_w, level, mode, general_canvas, optimizer, renderer, num_params, logger, perc_net, indices, global_loss=False):
+def optimization_loop_boundaries(args, src_img, opt_steps, target_patches, prev_canvas, strokes, budget, brush_size, patches_limits, npatches_w, level, mode, general_canvas, optimizer, renderer, num_params, logger, perc_net, indices, global_loss=False, name='boundaries', mask=None):
     """
     :param opt_steps: optimization steps, an integer
     :param prev_canvas: canvas that correspond to the previous layer, a tensor of shape [N,C,H,W]
@@ -111,8 +111,13 @@ def optimization_loop_boundaries(args, src_img, opt_steps, target_patches, prev_
     :param general_canvas: the general bigger canvas to compose the crops onto, a tensor of shape [1, 3, H, W]
     :param optimizer: pytorch optimizer 
     """
-    # Select boundary patches that have boundaries 
+    # Out of all patches, select those that have boundaries/mask
     target_patches = torch.index_select(target_patches, 0, torch.Tensor(indices).int().to(device))
+    
+    # mask is a list containing all patches, get only the binary masks given by the indices 
+    if mask != None:
+        bin_mask_patches = torch.cat(mask, dim=0).to(device)
+        mask = torch.index_select(bin_mask_patches, 0, torch.Tensor(indices).int().to(device))
     
     # Optimization loop             
     for i in range(opt_steps):
@@ -145,14 +150,14 @@ def optimization_loop_boundaries(args, src_img, opt_steps, target_patches, prev_
             end_bl = time.time()
             
             print(f'Blending time: {end_bl-st_bl} seconds')
-            logger.add_image(f'general_painting_boundaries_{level}', img_tensor=general_canvas.squeeze(), global_step=i)
+            logger.add_image(f'general_painting_{name}_{level}', img_tensor=general_canvas.squeeze(), global_step=i)
             
             # if using global loss, log info
             if global_loss:
-                logger.add_image(f'boundaries_dec_{level}', img_tensor=general_canvas_dec.squeeze(), global_step=i)
+                logger.add_image(f'{name}_dec_{level}', img_tensor=general_canvas_dec.squeeze(), global_step=i)
 
         # Compute loss between canvases with boundaries and boundaries patches and optimize 
-        loss, l1_loss, perc_loss = loss_utils.compute_loss(args, perc_net, canvas_selected, target_patches.float(), use_mse=True, use_clip=False)
+        loss, l1_loss, perc_loss = loss_utils.compute_loss(args, perc_net, canvas_selected, target_patches.float(), use_mse=True, use_clip=False, mask=mask)
         
         if global_loss:
             loss, l1_loss, perc_loss = loss_utils.compute_loss(args, perc_net, general_canvas_dec, source_img_dec, use_clip=False)
