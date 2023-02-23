@@ -7,28 +7,27 @@ from src.painter import Painter
 def create_parser():
     parser = argparse.ArgumentParser(description='Stroke Optimization')
 
-    parser.add_argument('--exp_name', type=str, default = 'exp_23_landscape_dalle1_segments')
+    parser.add_argument('--exp_name', type=str, default = 'exp_73_mask_texturize')
     
     # strategy settings
     parser.add_argument('--global_loss', type=bool, default = False)
     parser.add_argument('--texturize', type=bool, default = True)
-    parser.add_argument('--salient_mask', type=str, default='')
 
     parser.add_argument('--use_segmentation_mask', type=bool, default = True)
-    parser.add_argument('--use_segmentation_contours', type=bool, default = True)
+    parser.add_argument('--use_segmentation_contours', type=bool, default = False)
     parser.add_argument('--filter_strokes', type=bool, default = True)
 
     parser.add_argument('--use_edges', type=bool, default = False)
     parser.add_argument('--paint_by_patches', type=bool, default = True)
 
-    parser.add_argument('--start_natural_level', type=int, default = 2)
+    parser.add_argument('--start_natural_level', type=int, default = 3)
     parser.add_argument('--patch_strategy_detail', type=str, default='natural', choices=['grid', 'natural'])
 
     parser.add_argument('--overlap', type=int, default=20)
 
-    parser.add_argument('--brush_sizes', type=list, default=[0.8, 0.3, 0.1, 0.05]) 
-    parser.add_argument('--budgets', type=list, default=[9, 16, 49, 64]) 
-    parser.add_argument('--iter_steps', type=list, default=[250, 250, 250, 250]) 
+    parser.add_argument('--brush_sizes', type=list, default=[0.8, 0.5, 0.2, 0.05]) # 0.8, 0.3, 0.1, 0.05
+    parser.add_argument('--budgets', type=list, default=[9, 9, 36, 36])  # 9, 16, 49, 64
+    parser.add_argument('--iter_steps', type=list, default=[300, 500, 250, 250]) 
 
     parser.add_argument('--number_natural_patches', type=int, default=[10, 15])  # [25, 30, 25] # [30, 50, 60] WE DID NOT DEFINE THIS IN THE PAPER 
 

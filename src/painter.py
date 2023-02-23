@@ -11,6 +11,8 @@ from losses import clip_loss as CL
 from losses import loss_utils
 import src.optimization as opt
 import torch.nn.functional as F
+from utils import stroke_initialization as SI
+from utils import filter_utils as FU
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -26,6 +28,9 @@ class Painter():
         # Logger 
         self.logger = utils.init_logger(args)
 
+        self.segm_budget = {'sky':9, 'mountain':9, 'dirt':36, 'tree':49}
+        self.segm_order = ['background','sky', 'mountain', 'building', 'pavement', 'wall', 'roof', 'floor', 'dirt', 'grass',  'window', 'tree', 'fence', 'car', 'bus', 'boat', 'bicycle', 'person']
+    
         # Create dictionary that maps ids to names 
         if args.use_segmentation_mask:
             categories_json = '/home/manuelladron/projects/npp/stroke_opt_main/stroke_opt_23/utils/coco_panoptic_cat.json'
@@ -58,7 +63,7 @@ class Painter():
         """ 
 
         # Get source image and number of patches per side 
-        src_img, mask, npatches_h, npatches_w, segm_mask_ids, boundaries, segm_cat_ids, seg_labels, binary_masks_list = utils.process_img(self.args, 
+        src_img, mask, npatches_h, npatches_w, segm_mask_ids, boundaries, segm_cat_ids, seg_labels, binary_masks_list, self.segm_mask_color = utils.process_img(self.args, 
                                                                                                             self.args.image_path, writer=self.logger, 
                                                                                                             resize_value=None) # torch tensor [1, 3, H, W]
         self.npatches_total = npatches_h * npatches_w
@@ -90,8 +95,8 @@ class Painter():
             self.patches, self.patches_limits = utils.get_patches_w_overlap(self.args, src_img, npatches_h, npatches_w, writer=self.logger, name='src_img')
             
             # For mask 
-            if self.args.salient_mask:
-                self.mask_patches, _ = utils.get_patches_w_overlap(self.args, mask, npatches_h, npatches_w, writer=self.logger, name='salient_mask')
+            # if self.args.salient_mask:
+            #     self.mask_patches, _ = utils.get_patches_w_overlap(self.args, mask, npatches_h, npatches_w, writer=self.logger, name='salient_mask')
             
             # For segmentation boundaries 
             if self.args.use_segmentation_contours:
@@ -107,12 +112,20 @@ class Painter():
                     nz_x, nz_y = np.nonzero(segm_cat_ids * binary_masks_list[i])
                     id = segm_cat_ids[nz_x[0], nz_y[0]]
                     name = self.id_to_name[id]
+                    if '-' in name:
+                        name = name.split('-')[0]
                     mask = torch.from_numpy(np.expand_dims(binary_masks_list[i], axis=(0,1))).float().to(device) # [H, W] -> [1, 1, H, W]
 
                     bin_mask_patches, _ = utils.get_patches_w_overlap(self.args, mask, npatches_h, npatches_w, writer=self.logger, name=f'seg_mask_{name}_id_{id}')
                     self.list_binary_mask_patches.append(bin_mask_patches)
                     self.list_binary_mask_names.append(name)
-            
+
+                # Order masks 
+                zipped_names_and_segments = utils.order_tuple_list_by_index(list(zip(self.list_binary_mask_names, self.list_binary_mask_patches)), self.segm_order)
+                
+                # Unzip tuples
+                self.list_binary_mask_names, self.list_binary_mask_patches = zip(*zipped_names_and_segments)
+
             print(f'Total patches collected: {len(self.patches_limits)}')
             print(f'Patches height: {npatches_h}, patches width: {npatches_w}')
 
@@ -162,14 +175,18 @@ class Painter():
 
         :return: target_patches, patches_limits, indices, values, mask_patches, boundaries patches, segm patches 
         """  
+        
         boundaries_patches, mask_patches_list = 0, []
+        
         if mode == 'uniform':
+            
             if self.args.use_segmentation_contours:
                 boundaries_patches = torch.cat(self.segm_boundaries_patches, dim=0).to(device)
 
+            # Iterate over segmentation binary masks and reutrn a list of patches of length number of segmentation masks 
             if self.args.use_segmentation_mask: 
                 mask_patches_list = []
-                for i in range(len(self.list_binary_mask_patches)):
+                for i in range(len(self.list_binary_mask_patches)): # this is a list of length number of segemntation masks. Each element in list is another list with a bunch of patches that build up the mask 
                     mask_patches = self.list_binary_mask_patches[i]
                     mask_patches = torch.cat(mask_patches, dim=0).to(device)
                     mask_patches_list.append(mask_patches)
@@ -186,10 +203,10 @@ class Painter():
             # Update npatches_total because it is set to the number of patches in the uniform grid layers 
             self.npatches_total = len(target_patches)
             
-            return target_patches, patches_limits, indices, values, mask_patches, boundaries_patches
+            return target_patches, patches_limits, indices, values, mask_patches, boundaries_patches, 0
 
 
-    def optimize(self, canvas, canvas_text, canvas_style, opt_steps, budget, brush_size, level, learned_strokes, total_num_patches, mode, salient_mask=False):
+    def optimize(self, canvas, canvas_text, canvas_style, opt_steps, budget, brush_size, level, learned_strokes, total_num_patches, mode, salient_mask=False, debug=False):
         """
         Optimization function called at each painting layer. Initiates a new set of strokes, paints, compute losses and optimizes strokes.
 
@@ -203,17 +220,17 @@ class Painter():
         :param mode: uniform or natural painting flag, a string
         """
         # Get patches, uniform or natural 
-        target_patches, patches_limits, indices, values, mask_patches, boundaries_patches_alpha, mask_patches_list = self.get_reference_patches(mode, level, total_num_patches, salient_mask) # [npatches, 3, 128, 128] 
+        target_patches, patches_limits, indices, values, _, boundaries_patches_alpha, mask_patches_list = self.get_reference_patches(mode, level, total_num_patches, salient_mask) # [npatches, 3, 128, 128] 
 
         # Transform boundaries alphas to boundaries color 
         if self.args.use_segmentation_contours:
             boundaries_patches = boundaries_patches_alpha * target_patches # [total_patches, 3, 128, 128] 
         
+        # Get painting chunks from masks by multiplying the alpha mask by the target patch 
         if self.args.use_segmentation_mask:
             mask_color_patches_list =[]
             for i in range(len(mask_patches_list)):
-                mask = mask_patches_list[i]
-                mask_color_patch = mask * target_patches # [total_patches, 3, 128, 128] 
+                mask_color_patch = mask_patches_list[i] * target_patches # [total_patches, 3, 128, 128] 
                 mask_color_patches_list.append(mask_color_patch)
 
         # 1) If we have already learned strokes, we start the canvas painting with those strokes, otherwise is the coarsest level and we start with a black canvas
@@ -233,56 +250,85 @@ class Painter():
             if self.args.texturize:
                 prev_canvas_text = utils.crop_image(patches_limits, self.general_canvas_texture)
 
-        # If using segmentation masks or not 
-        if self.args.use_segmentation_mask and level > 0:
-            
-            if canvas == None:
-                canvas = prev_canvas
 
+
+        # Use segmentation painting after a first (level 0) uniform pass 
+        if self.args.use_segmentation_mask and level == 2:
+            
+            # if canvas == None:
+            #     canvas = prev_canvas
+
+            canvases_segmentation = []
+            canvases_names = []
+            
+            # Iterate over segmentation masks, independently from each other 
             for i in range(len(self.list_binary_mask_patches)):
+                
                 # Select mask 
                 mask = self.list_binary_mask_patches[i] # list with patches 
+                color_mask = mask_color_patches_list[i] # Color mask 
                 name = self.list_binary_mask_names[i]
+                canvases_names.append(name)
+
+                # Set budget per segmentation mask 
+                for k,v in self.segm_budget.items():
+                    if k in name:
+                        budget = v
+                        print(f'\nFor mask: {name}, budget: {v}')
+                
                 print(f'\n---- Optimizing mask: {name}------\n')
 
-                # init strokes in mask 
-                min_num_pixels_mask = 10
-                strokes, mask_indices = utils.init_strokes_boundaries(min_num_pixels_mask, budget, device, mask, patches_limits)
+                # Initialize strokes in mask 
+                min_num_pixels_mask = int((128*128)*.25) # 25% of the patch should be a mask 
+                strokes, mask_indices = SI.init_strokes_with_mask(min_num_pixels_mask, budget, device, mask, patches_limits, target_patches)
 
                 # Create a new optimizer 
                 optimizer_m = torch.optim.Adam([strokes], lr=self.args.lr)
                 
-                # Color mask 
-                color_mask = mask_color_patches_list[i]
-
-                # Optimization loop 
-                canvas_mask, general_canvas_with_mask = opt.optimization_loop_boundaries(self.args, self.src_img, 400, color_mask, prev_canvas, strokes, budget, 
+                # Optimization loop - canvas mask is all canvases 
+                canvas_mask, general_canvas_with_mask = opt.optimization_loop_boundaries(self.args, self.src_img, 300, color_mask, prev_canvas, strokes, budget, 
                                                                     brush_size, patches_limits, self.npatches_w, level, mode, self.general_canvas, optimizer_m, 
                                                                     self.renderer, self.num_params, self.logger, self.perc, mask_indices, global_loss=False, 
                                                                     name=name, mask=mask) 
 
-
-                # Render boundary strokes on the previous layer's canvases:
+                # Render strokes on the previous layer's canvases:
                 # boundary_strokes contain less patches than overall canvases, so we first need to select the canvases following indices 
                 canvas_selected = torch.index_select(prev_canvas, 0, torch.Tensor(mask_indices).int().to(device))
 
-
                 if self.args.filter_strokes:
+                    # selects only the masks that correspond to **this** segmentation part. 
+                    mask = torch.cat(mask, dim=0).to(device) # [N, 3, 128, 128]
+                    mask = torch.index_select(mask, 0, torch.Tensor(mask_indices).int().to(device)) # [M, 1, 128, 128] M << N (patches where the mask is present)
+
                     # Filter out strokes that aren't in mask 
-                    valid_strokes, valid_patch_indices, valid_strokes_indices = utils.filter_strokes(strokes, mask, mask_indices, device)
+                    valid_strokes, valid_patch_indices, valid_strokes_indices, debug_strokes = FU.filter_strokes(target_patches, strokes, mask, mask_indices, brush_size, self.renderer, self.logger, device, debug=debug)
+                    
+                    # FOR DEBUGGING 
+                    if debug:
+                        canvas_debug, _, _ = utils.render(canvas_selected, debug_strokes, budget, brush_size, self.renderer, num_params=13)
+                        total_number_of_indices = prev_canvas.shape[0]
+                        indices_no_boundaries = list(set(range(total_number_of_indices)) - set(mask_indices))
+                        
+                        all_canvas_debug = utils.merge_tensors(canvas_debug, canvas, mask_indices, indices_no_boundaries)
+                        gen_canvas_debug = utils.compose_general_canvas(self.args, all_canvas_debug, 'uniform', patches_limits, self.npatches_w, self.general_canvas, blendin=True)
+                        
+                        self.logger.add_image(f'canvas_debug_{name}_level_{level}', img_tensor=gen_canvas_debug.squeeze(0),global_step=0)
+                    
                     """
                     valid strokes: are padded strokes of the same shape as strokes 
                     valid_patch_indices: indices of patches that have a mask AND have some valid strokes
                     valid_strokes_indices: boolean tensor of shape [budget, patches] 
                     """
-                    canvas_selected = utils.render_with_filter(canvas_selected, valid_strokes, valid_patch_indices, valid_strokes_indices, brush_size, self.renderer)
+                    # update canvas_selected to not paint 
+                    canvas_selected = utils.render_with_filter(canvas_selected, valid_strokes, valid_patch_indices, valid_strokes_indices, brush_size, mask, self.renderer)
                     
                     # Recompose all canvases - Generate indices that correspond to the canvases that do not have boundaries 
                     total_number_of_indices = prev_canvas.shape[0]
                     indices_no_boundaries = list(set(range(total_number_of_indices)) - set(valid_patch_indices))
                     
+                    # Re-merge all canvases with and without masks 
                     canvas = utils.merge_tensors(canvas_selected, canvas, valid_patch_indices, indices_no_boundaries)
-                
+
                 else:
                     # Update now the selected canvases
                     canvas_selected, _, _ = utils.render(canvas_selected, strokes, budget, brush_size, self.renderer, self.num_params)
@@ -293,17 +339,46 @@ class Painter():
                     
                     canvas = utils.merge_tensors(canvas_selected, canvas, mask_indices, indices_no_boundaries)
                 
+                canvases_segmentation.append(canvas)
+
                 # Compose all canvases patches into a bigger canavs 
                 self.general_canvas = utils.compose_general_canvas(self.args, canvas, 'uniform', patches_limits, self.npatches_w, self.general_canvas, blendin=True)
-                self.logger.add_image(f'final_canvas_mask_{name}_level_{level}', img_tensor=self.general_canvas.squeeze(0),global_step=0)
+                #self.logger.add_image(f'canvas_segmented_{name}_level_{level}', img_tensor=gen_canvas.squeeze(0),global_step=0)
 
+                # Here we are updating canvas in between the masks but we should do this afterward 
                 prev_canvas = canvas.detach()
+                
+            # Once all masks are painted, put them together 
+            
+            # We have canvases name and canvas segmentation in a random order. We need to asign an order to paint for instance a person after the pavement. 
+            # 1) Sort the canvases_names by the established order above 
+            # 2) Iterate over canvases_segmentation list based on the new order 
 
+            #zipped_names_segments = utils.order_tuple_list_by_index(list(zip(canvases_names, canvases_segmentation)), self.segm_order)
+            
+            # for i in range(len(zipped_names_segments)):
+            #     this_name = zipped_names_segments[i][0]
+            #     this_canvas = zipped_names_segments[i][1]
+
+            #     print('this name: ', this_name)
+            #     self.general_canvas = utils.compose_general_canvas(self.args, this_canvas, 'uniform', patches_limits, self.npatches_w, self.general_canvas, blendin=True)
+                
+            #     self.logger.add_image(f'final_canvas_mask_{this_name}_level_{level}', img_tensor=self.general_canvas.squeeze(0),global_step=0)
+
+            # Overlay segmentation mask with canvas 
+            general_canvas_np = self.general_canvas.cpu().squeeze().permute(1,2,0).numpy() # [C,H,W] -> [H,W,C]
+            segm_mask_color_np = self.segm_mask_color.cpu().permute(1,2,0).numpy() # [C,H,W] -> [H,W,C]
+            
+            segm_mask_overlay_canvas = utils.overlay_image_and_mask(general_canvas_np, segm_mask_color_np, alpha=0.5, img_normalized=True)
+            segm_mask_overlay_canvas = torch.from_numpy(segm_mask_overlay_canvas.transpose(2,0,1)) # [C, H, W]
+            
+            self.logger.add_image(f'final_canvas_overlay_lvl_{level}', img_tensor=segm_mask_overlay_canvas.squeeze(0),global_step=0)
+            self.logger.add_image(f'final_canvas_lvl_{level}', img_tensor=self.general_canvas.squeeze(0),global_step=0)
         
+        # Uniform / natural painting without using masks 
         else:
-
-            # init strokes 
-            strokes = utils.init_strokes_patches(budget, self.args.stroke_init_mode, device, self.npatches_total) # [budget, npatches, 13]
+            # init strokes
+            strokes = SI.init_strokes_patches(budget, self.args.stroke_init_mode, device, self.npatches_total) # [budget, npatches, 13]
 
             # Setup optimizer 
             optimizer = torch.optim.Adam([strokes], lr=self.args.lr)
@@ -317,24 +392,23 @@ class Painter():
                                                                 self.renderer, self.num_params, self.logger, self.perc, opt_style=False)      
 
 
-        # Final blending 
-        self.general_canvas = utils.compose_general_canvas(self.args, canvas, mode, patches_limits, self.npatches_w, self.general_canvas, blendin=True)
-        
-        # Add logger 
-        self.logger.add_image(f'final_canvas_base_level_{level}', img_tensor=self.general_canvas.squeeze(0),global_step=0)
+            # Final blending 
+            self.general_canvas = utils.compose_general_canvas(self.args, canvas, mode, patches_limits, self.npatches_w, self.general_canvas, blendin=True)
+            
+            # Add logger 
+            self.logger.add_image(f'final_canvas_base_level_{level}', img_tensor=self.general_canvas.squeeze(0),global_step=0)
 
-        # Save base strokes to return them 
-        base_strokes = strokes.clone()
+            # Save base strokes to return them 
+            base_strokes = strokes.clone()
         
         # this is used only once 
         if self.args.use_segmentation_contours and level == 1:
             print(f'\n------Optimizing contouring strokes-------')
 
-            # TODO: Wrap this up in a function 
             # Init strokes 
             boundaries_budget = 4
             min_num_pixels_boundary = 10
-            boundary_strokes, boundary_indices = utils.init_strokes_boundaries(min_num_pixels_boundary, boundaries_budget, device, boundaries_patches_alpha, patches_limits)
+            boundary_strokes, boundary_indices = SI.init_strokes_with_mask(min_num_pixels_boundary, boundaries_budget, device, boundaries_patches_alpha, patches_limits, target_patches, edges=True)
             
             # boundaries_patches: [total_num_patches, 1, 128, 128]
             # boundary_strokes: [4, 45 (len boundary_indices), 13]
@@ -347,7 +421,7 @@ class Painter():
             prev_canvas = torch.zeros(self.npatches_total, 3, 128, 128).to(device)  # [npatches, 1, H, W]
 
             # Optimization loop 
-            canvas_boundaries, general_canvas_with_boundaries = opt.optimization_loop_boundaries(self.args, self.src_img, 400, boundaries_patches, prev_canvas, boundary_strokes, boundaries_budget, 
+            canvas_boundaries, general_canvas_with_boundaries = opt.optimization_loop_boundaries(self.args, self.src_img, 300, boundaries_patches, prev_canvas, boundary_strokes, boundaries_budget, 
                                                                 brush_size, patches_limits, self.npatches_w, level, mode, self.general_canvas, optimizer_b, 
                                                                 self.renderer, self.num_params, self.logger, self.perc, boundary_indices, global_loss=False) 
         
@@ -397,7 +471,14 @@ class Painter():
             # Add logger 
             self.logger.add_image(f'final_canvas_style_level_{level}', img_tensor=self.general_canvas_style.squeeze(0),global_step=0)
 
-        
+    
+        # Add texture 
+        if self.args.texturize:
+            canvas_text, _, _  = utils.render(prev_canvas_text, strokes, budget, brush_size, self.renderer, self.num_params, texturize=True, painter=self, writer=self.logger)
+            self.general_canvas_texture = utils.compose_general_canvas(self.args, canvas_text, mode, patches_limits, self.npatches_w, self.general_canvas_texture, blendin=True)
+
+            self.logger.add_image(f'final_canvas_texture_level_{level}', img_tensor=self.general_canvas_texture.squeeze(0),global_step=0)
+
         return canvas, base_strokes, canvas_text, canvas_style
 
 
@@ -452,7 +533,7 @@ class Painter():
             # Main function 
             canvas, strokes, canvas_text, canvas_style = self.optimize(canvas, canvas_text, canvas_style, opt_steps, budget,
                                                         brush_size, level=k, learned_strokes=learned_strokes, total_num_patches = total_num_patches, 
-                                                        mode=mode, salient_mask=salient_mask)
+                                                        mode=mode, salient_mask=salient_mask, debug=False)
             
             end = time.time()
             

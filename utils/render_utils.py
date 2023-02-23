@@ -1,9 +1,12 @@
 import numpy as np 
 import torch 
-import utils 
+from utils import utils 
 import pdb 
 import torch.nn.functional as F
 #import morphology
+import kornia 
+import cv2
+
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
@@ -18,7 +21,7 @@ def _forward_pass_l2p_alpha(action, num_params, renderer):
 
         return stroke.repeat(1,3,1,1) # returns alpha with 3 channels
 
-def texturize(strokes, canvases, brush_size, t, num_params, renderer, args, level, start_organic_level, writer, onehot=None, mask_patches=None, painter=None):
+def texturize(strokes, canvases, brush_size, t, num_params, writer, onehot=None, mask_patches=None, painter=None):
     """
     Processes textures stroke by stroke
     :param strokes: [n_patches, 13]
@@ -28,63 +31,23 @@ def texturize(strokes, canvases, brush_size, t, num_params, renderer, args, leve
     """
     valid_strokes = 0
     invalid_strokes = 0
-    strokes = utils.remove_transparency(strokes, num_params)
+    strokes = utils.remove_transparency(strokes, num_params=num_params)
     strokes = utils.clip_width(strokes, num_params, max=brush_size)
     # iterate over patches and apply texture one by one
     alphas, foregrounds = [], []
-    # pdb.set_trace()
 
     for p in range(strokes.shape[0]): # Iterate over patches. Single stroke here
+        
+        # 
         canvas = canvases[p] # [3, 128, 128]
         stroke = strokes[p].unsqueeze(0) # [1, 13]
 
-        if level >= start_organic_level and args.salient_mask:
-            #idx_nopaint = onehot[p].item() # index to not paint
-            if p in onehot:
-                print('Not painting this stroke')
-                invalid_strokes += 1
-                continue
-
-            # Checking whether the stroke is outside the mask by adding alphas
-            mask_patch = mask_patches[p] # [1, 128, 128]
-            stroke_alpha = _forward_pass_l2p_alpha(stroke)[:,0] # [1, 128, 128]
-            stroke_alpha[stroke_alpha >= 0.3] = 1.
-            stroke_alpha[stroke_alpha < 0.3] = 0.
-            mask_patch[mask_patch >= 0.3] = 1.
-            mask_patch[mask_patch < 0.3] = 0.
-            masks_together = (mask_patch + stroke_alpha).clip(max=1.0)
-
-            if masks_together.sum().item() > mask_patch.sum().item(): # if the number of 1s is higher in mask + stroke than in mask alone, then the stroke goes outside the mask 
-                print('Not painting this stroke')
-                invalid_strokes += 1
-                continue
-
-        # Not using this method
-        # if onehot != None: # dont paint if outside mask
-        #     paint = onehot[p]
-        #     if paint == 0:
-        #         print(f'Not painting this stroke onehot: {stroke} ')
-        #         continue
-        #
-        # if torch.sum(stroke[:, 8:10], dim=1) == 0.:
-        #     print(f'Not painting this stroke: {stroke} ')
-        #     continue
-
-        if args.renderer_type == 'snp':
-            foreground, alpha = utils._draw_oilpaintbrush(painter, stroke.squeeze().detach().cpu()) # [128, 128, 3]
-            foreground = torch.from_numpy(foreground).permute(2,0,1).to(device) # black background
-            alpha = torch.from_numpy(alpha).permute(2,0,1).to(device) # black background # [3, 128, 128]
-
-        else:
-            foreground, alpha = utils.texturizer(painter, writer, stroke, 128, p, t)
+        foreground, alpha = texturizer(painter, writer, stroke, 128, p, t)
 
         canvas = canvas * (1 - alpha) + (foreground * alpha)  # [3, 128, 128]
 
         writer.add_image(f'stroke_text', img_tensor=foreground, global_step=p)
         writer.add_image(f'alpha_text', img_tensor=alpha, global_step=p)
-
-        if args.video:
-            painter.texturized_strokes_level[p, t] = canvas
 
         canvases[p] = canvas
         alphas.append(alpha)
@@ -92,10 +55,12 @@ def texturize(strokes, canvases, brush_size, t, num_params, renderer, args, leve
         #self.all_texturized_strokes.append(canvas)
         valid_strokes += 1
 
-    print(f'Invalid strokes in level {level}: {invalid_strokes}')
-    print(f'Valid strokes in level {level}: {valid_strokes}')
+    # print(f'Invalid strokes in level {level}: {invalid_strokes}')
+    # print(f'Valid strokes in level {level}: {valid_strokes}')
 
     return canvases, foregrounds, alphas
+
+
 
 def _forwad_pass_l2p(stroke, canvas, brush_size, num_params, renderer, idx=None):
     """
@@ -352,4 +317,183 @@ def blend_general_canvas_organic_gif(self, canvas, general_canvas, patch_limit):
 
     return general_canvas
 
+def calculate_euclidean_dist(c0, c1):
+    # c0, c1 -> [1, 2]
+    # print(f'first point: {c0}, second point: {c1}')
+    sum_sq = torch.sum(torch.square(c0 - c1), dim=1)
+    euclidean_dist = torch.sqrt(sum_sq)
+    return euclidean_dist
 
+def texturizer(painter, writer, stroke_param, canvas_size, patch, time):
+    """
+    Apply texture stroke by stroke. Depending on the shape of the stroke, will apply texture in different ways
+    :param painter: 
+    :param writer: 
+    :param stroke_param: [1,13]
+    :param canvas_size:  128
+    :param brush_size:   varies
+    :return: 
+    """
+    t1 = '../../painting_tools/brushes/noshape_light.png'
+    # t1 = '../painting_tools/brushes/brush_large_vertical_clean2.png'
+    # t2 = '../painting_tools/brushes/acrylic_w2.png'
+    # t3 = '../painting_tools/brushes/oil_bump.png'
+
+    # id_text = np.random.randint(0, 2)
+    # textures = [t1, t3]
+    # chosen_texture = textures[id_text]
+
+    # Extract coordinates 
+    y0, x0 = stroke_param[0, :2]
+    y1, x1 = stroke_param[0, 2:4]
+    y2, x2 = stroke_param[0, 4:6]
+
+    y1 = y0 + (y2 - y0) * y1
+    x1 = x0 + (x2 - x0) * x1
+
+    c0 = stroke_param[:, :2]
+    c1 = torch.stack((y1, x1)).unsqueeze(0).to(device)
+    c2 = stroke_param[:, 4:6]
+
+    # Stroke length 
+    ed1 = calculate_euclidean_dist(c0, c1)
+    ed2 = calculate_euclidean_dist(c1, c2)
+    stroke_length = ed1 + ed2
+
+    # print('stroke lenght in pixels: ', stroke_length * canvas_size)
+    # print('stroke lenght normalized: ', stroke_length)
+    # print('firsthalf lenght normalized: ', ed1)
+    # print('secondhalf lenght normalized: ', ed2)
+
+    avg_rad = (stroke_param[0, 6] + stroke_param[0, 7]) / 2
+    # print('radius average: ', avg_rad)
+
+    ratio = stroke_length / avg_rad
+    # print(f'ratio length/radius: {ratio}')
+    linear = 0
+    curved = 0
+
+    # pdb.set_trace()
+    # if avg_rad > 0.8 or ratio < 2 or stroke_length < 0.1 or ed1 < 0.15 or ed2 < 0.15:
+    linear += 1
+    x_ct = (x0 + x2) / 2
+    y_ct = (y0 + y2) / 2
+    ct_pt = torch.stack((y_ct, x_ct)).unsqueeze(0).to(device)
+    fore, alpha = add_linear_texture(painter, stroke_param, canvas_size, t1, ct_pt, stroke_length, visualize=False)
+        # writer.add_image(f'text_linear_p_{patch}_t_{time}', img_tensor=fore,global_step=0)
+        # pdb.set_trace()
+    # else:
+    #     curved += 1
+    #     fore, alpha = add_curved_texture(painter, stroke_param, canvas_size, t1, postprocess=True)
+        # writer.add_image(f'text_curved_p_{patch}_t_{time}', img_tensor=fore, global_step=0)
+        # pdb.set_trace()
+
+    fore = fore.clip(min=0, max=1)
+    alpha = alpha.clip(min=0, max=1)
+    # print('in texturizer')
+    # pdb.set_trace()
+    return fore, alpha  # [3, 128, 128]
+
+
+def add_linear_texture(painter, stroke_param, canvas_size, texture_path, center_pt, stroke_length, visualize=False):
+    """
+    Function that rotates and translates bitmap according to stroke parameters.
+    Center point is [1, 2], and it is the target of translation.
+    """
+    img = cv2.imread(texture_path, cv2.IMREAD_COLOR)[:, :, ::-1]
+    img = cv2.resize(img, (canvas_size, canvas_size), interpolation=cv2.INTER_AREA)  # [128,128,3] uint8 [0-255]
+
+    if visualize:
+        plt.imshow(img)
+        plt.show()
+
+    # Convert to pytorch
+    img_p = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(dim=0).to(device) /255 # [1, 3, 128, 128] uint8 [0-255]
+
+    # If stroke is too long, we rescale a bit the bitmap 
+    # if stroke_length.item() > 0.65:
+    #     scale_factor = torch.FloatTensor([1, 2]).unsqueeze(0).to(device)
+    #     img_p = kornia.geometry.transform.scale(img_p / 255, scale_factor)
+    #     if visualize:
+    #         sc_np = img_p * 255
+    #         sc_np = sc_np.squeeze().permute(1, 2, 0).detach().cpu().numpy().astype(np.uint8)
+    #         plt.imshow(sc_np)
+    #         plt.show()
+
+    ##### 1) ROTATION over brush stroke center X,Y = 70, 60 # Calculated by eye from bitmap
+    X, Y = 64, 64 #70, 60  # Calculated by eye from bitmap
+    brush_center = torch.Tensor((X, Y)).unsqueeze(0).to(device)
+    # Find angle between start and end points
+    y0, x0 = stroke_param[0, :2]  # [2]
+    y2, x2 = stroke_param[0, 4:6]  # [2]
+
+    # https://stackoverflow.com/questions/42258637/how-to-know-the-angle-between-two-vectors
+    theta_radians = torch.atan2(-(y2 - y0), (x2 - x0))
+    theta_degrees = torch.rad2deg(theta_radians) + 90
+
+    # if stroke_length.item() <= 0.65:
+    #     img_p = img_p / 255
+    rotation = kornia.geometry.transform.rotate(img_p, theta_degrees, center=brush_center, padding_mode='reflection')
+    # [0-1] range
+
+    # Visualization
+    if visualize:
+        rot_np = rotation * 255
+        rot_np = rot_np.squeeze().permute(1, 2, 0).detach().cpu().numpy().astype(np.uint8)
+        plt.imshow(rot_np)
+        plt.show()
+
+    transl = rotation
+    ##### 2) TRANSLATION: update (05.11.22) No need to translate
+    # y, x = center_pt.squeeze()
+    # center_pt_xy = torch.Tensor([x, y]).unsqueeze(0).to(device)
+    # center_pt_xy = center_pt_xy * canvas_size  # [1, 2]
+    # translation_vector = center_pt_xy - brush_center
+    #
+    # transl = kornia.geometry.transform.translate(rotation, translation_vector, mode='bilinear', padding_mode='zeros',
+    #                                              align_corners=True)  # [0-1] range
+    # pdb.set_trace()
+    # if visualize:
+    #     transl_np = transl * 255
+    #     transl_np = transl_np.squeeze().permute(1, 2, 0).detach().cpu().numpy().astype(np.uint8)
+    #     plt.imshow(transl_np)
+    #     plt.show()
+
+    # Mask out the shape and add color
+    alpha = _forward_pass_l2p_alpha(stroke_param, painter.num_params, painter.renderer)  # [1,3,128,128] [0-1] range 
+
+    if visualize:
+        alpha_np = (alpha.squeeze() * 255).permute(1, 2, 0).detach().cpu().numpy().astype(np.uint8)  # [H,W,3]
+        plt.imshow(alpha_np)
+        plt.show()
+
+    # Reshapes texture into alpha shape : basically, crops the bitmap with the alpha shape of the stroke 
+    transl[alpha < 0.4] = 0  # [0-1] range
+
+    # text_alpha_np = (transl*255).squeeze().permute(1, 2, 0).detach().cpu().numpy().astype(np.uint8)  # [H,W,3]
+    text_alpha_np = (transl).squeeze().permute(1, 2, 0).detach().cpu().numpy()  # [H,W,3]
+    text_alpha = text_alpha_np.copy()
+    # Blend it
+    R, G, B = stroke_param[0, 10], stroke_param[0, 11], stroke_param[0, 12]
+
+    text_alpha_np[:, :, 0] = text_alpha_np[:, :, 0] * R.item()  # [3, 128, 128]
+    text_alpha_np[:, :, 1] = text_alpha_np[:, :, 1] * G.item()  # text alpha is in [0-255], multiplied by 0.4 gives us
+    # intensity of the color
+    text_alpha_np[:, :, 2] = text_alpha_np[:, :, 2] * B.item()
+
+    foreground = cv2.dilate(text_alpha_np, np.ones([2, 2]))
+    alpha = cv2.erode(text_alpha, np.ones([2, 2]))
+
+    if visualize:
+        # plt.imshow(alpha)
+        # plt.show()
+        plt.imshow(foreground)
+        plt.show()
+
+    foreground = torch.FloatTensor(foreground).permute(2, 0, 1).to(device)  # / 255
+    alpha_text = torch.FloatTensor(text_alpha).permute(2, 0, 1).to(device)  # / 255
+
+    # alpha_text[alpha_text > 0.5] = 1 # 0.3
+    # print('in linear texture')
+    # pdb.set_trace()
+    return foreground, alpha_text  # alpha.squeeze()

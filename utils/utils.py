@@ -127,10 +127,12 @@ def map_segmentation_mask_to_colors(mask):
     return color_mask
 
 
-def overlay_image_and_mask(image, color_mask, alpha=0.5):
+def overlay_image_and_mask(image, color_mask, alpha=0.5, img_normalized=False):
+    
     # Normalize the image and color mask arrays to values between 0 and 1
-    image = image / 255.0
-    color_mask = color_mask / 255.0
+    if img_normalized == False:
+        image = image / 255.0
+        color_mask = color_mask / 255.0
     
     # Create a composite image by combining the original image and the color mask using the specified alpha value
     composite_image = image * (1.0 - alpha) + color_mask * alpha
@@ -202,7 +204,9 @@ def process_img(args, img_path, writer, resize_value=128, min_width=400):
     
     # Calculate segmentation map 
     segm_ids, boundaries, segm_cat_ids, seg_labels, binary_masks_list = 0, 0, 0, 0, []
+    segm_mask_color_with_boundaries = 0
     if args.use_segmentation_mask or args.use_segmentation_contours:
+        
         categories_json = '/home/manuelladron/projects/npp/stroke_opt_main/stroke_opt_23/utils/coco_panoptic_cat.json'
         with open(categories_json) as f:
             categories = json.load(f)
@@ -215,7 +219,6 @@ def process_img(args, img_path, writer, resize_value=128, min_width=400):
         boundaries = np.expand_dims(boundaries, axis=0) # [1, H, W]
         boundaries = torch.from_numpy(boundaries) # [1, H, W] -> Boolean tensor with boundaries selected
         
-        #pdb.set_trace()
         segm_mask_color = map_segmentation_mask_to_colors(segm_cat_ids) # [H, W, 3]
 
         # Overlay for visualization purposes 
@@ -232,6 +235,8 @@ def process_img(args, img_path, writer, resize_value=128, min_width=400):
         writer.add_image('segm_original', img_tensor=segm_mask_color_with_boundaries, global_step=0)
         writer.add_image('segm_original_overlay', img_tensor=segm_mask_overlay, global_step=0)
 
+        segm_mask_color_with_boundaries = segm_mask_color_with_boundaries.to(device)
+
     if args.use_edges:
         edges, contours = get_edges_and_contours(src_img)
         edges = normalize_img(edges)
@@ -244,7 +249,7 @@ def process_img(args, img_path, writer, resize_value=128, min_width=400):
     img = torch.from_numpy(src_img.transpose(2,0,1)).unsqueeze(0) # [1, C, H, W]
     
     print(f'Adjusted input image -> H={img.shape[2]}, W={img.shape[3]}')
-    return img, mask, npatches_h, npatches_w, segm_ids, boundaries, segm_cat_ids, seg_labels, binary_masks_list
+    return img, mask, npatches_h, npatches_w, segm_ids, boundaries, segm_cat_ids, seg_labels, binary_masks_list, segm_mask_color_with_boundaries
 
 
 def increase_boundary_thickness(binary_image, kernel_size=3, stride=1, padding=0):
@@ -296,11 +301,12 @@ def merge_tensors(tensor_a, tensor_b, indices_a, indices_b):
 def select_tensors_with_n_true(tensor_list, limits_list, N):
     """
     Selects indexes of tensors that at least have >= N true/1s values 
-    Returns list with selected indices and total number of selected tensors 
+    :returns: a list with selected indices and total number of selected tensors 
     """
     selected_tensors_idx = []
     selected_tensors = []
     n_total = 0
+    
     for i, tensor in enumerate(tensor_list):
         if (tensor.sum().item() >= N):
             selected_tensors_idx.append(i)
@@ -440,6 +446,17 @@ def create_N_random_patches(image, N, mask=None, threshold=60, patch_size=128):
     print(f'i: {i}, TOTAL NUMBER OF RANDOM PATCHES: {len(patches_limits)}, number of ditched patches: {d}')
     
     return patches_limits
+
+
+def visualize_progress(canvases, active_canvases, general_canvas, mask, indices):
+    """
+    :param canvas: [N, 3, 128, 128], N is all patches 
+    :param general_canvas: [1, 3, H, W], overall canvas 
+    :param mask: [M, 3, 128, 128], M << N is patches that correspond to segmentation mask 
+    :param active_canvases: [M, 3, 128, 128], M << N is patches that correspond to segmentation mask 
+    :indices: list of integers corresponding to where patches have a segementation mask  
+    """
+    return 0 
 
 
 def create_N_random_patches_BU(source_img, N, mask=None, salient_mask=False, threshold=60, patch_size=128):
@@ -611,216 +628,8 @@ def get_natural_patches(number_uniform_patches, source_img, general_canvas, logg
 
 # STROKES UTILITIES -------------- 
 
-def create_grid_strokes(budget, num_params, device, std = 0.05):
-    """
-    Creates a grid of strokes evenly distributed on the canvas. 
-    
-    Each stroke is parameterized by a 13D vector [x0,y0,x1,y1,x2,y2, r0, r2, t0, t2, rgb] 
-    
-    Idea: 1) get midpoints of each stroke, spread them evenly on the canvas 
-          2) Have a gaussian centered on each of the midpoints, and sample start and end points 
-          3) Other parameters (color, thickness, etc, are randomly sampled)
-    """
-    # Get a square number 
-    strokes_per_side = int(np.sqrt(budget)) # sqrt(300) ~ 17
-    #print('strokes_per side: ', strokes_per_side)
 
-    # Arrange midpoint coordinates on canvas 
-    x1 = torch.arange(0.05, 0.95, 1 / strokes_per_side).to(device)
-    y1 = torch.arange(0.05, 0.95, 1 / strokes_per_side).to(device)
-
-    # Create meshgrid 
-    x, y = torch.meshgrid(x1, y1) # x -> [strokes_per_side, strokes_per_side], y -> [strokes_per_side, strokes_per_side]
-
-    # Flatten these coordinates 
-    x = torch.flatten(x).unsqueeze(1) # [budget, 1]
-    y = torch.flatten(y).unsqueeze(1) # [budget, 1]
-
-    # Get x0,y0 and x2,y2 coordinates 
-
-    x0 = torch.normal(mean=x, std=std).clip(min=0, max=1).to(device)
-    y0 = torch.normal(mean=y, std=std).clip(min=0, max=1).to(device)
-
-    x2 = torch.normal(mean=x, std=std).clip(min=0, max=1).to(device)
-    y2 = torch.normal(mean=y, std=std).clip(min=0, max=1).to(device)
-
-    # Other parameters: radius, transparency and rgb 
-    rad = torch.rand(budget, 2, requires_grad=True, device=device)
-    transp = torch.ones(budget, 2, requires_grad=True, device=device)
-    rgb = torch.rand(budget, 3, requires_grad=True, device=device)
-
-    # Put them together 
-    strokes = torch.cat([x0,y0, x, y, x2,y2, rad, transp, rgb], dim=1).requires_grad_()
-
-    return strokes 
-
-def init_strokes(budget, mode, device, num_params=13):
-    """
-    Initializes random strokes parameters on a canvas given a budget
-    """
-    if mode == 'random':
-        # uniform distribution 
-        strokes = torch.rand(budget, num_params, requires_grad=True, device=device)
-    
-    elif mode == 'grid':
-        strokes = create_grid_strokes(budget, num_params, device)
-
-    return strokes 
-
-def init_boundary_stroke_params(boundaries, budget, device, std = 0.05):
-    """
-    Given a boolean tensor of shape [128x128], get x,y coordinates over True values, and build the rest of the stroke based on this
-    :param boundaries: a boolean tensor of shape [128x128]
-    :budget: number of strokes 
-
-    :returns: strokes parameter 
-    """
-    x, y = init_coordinates_in_mask(boundaries, budget, device) # Tensor Long [budget]
-
-    # Convert to float 
-    x = (x/128.0).unsqueeze(1) # [budget, 1]
-    y = (y/128.0).unsqueeze(1)
-
-    # Given x and y, both long tensors of shape [budget] representing locations within a patch (range 0-127), get x0 and x2 sampling from a gaussian.
-    x0 = torch.normal(mean=x, std=std).clip(min=0, max=1).to(device)
-    y0 = torch.normal(mean=y, std=std).clip(min=0, max=1).to(device)
-
-    x2 = torch.normal(mean=x, std=std).clip(min=0, max=1).to(device)
-    y2 = torch.normal(mean=y, std=std).clip(min=0, max=1).to(device)
-
-    # Other parameters: radius, transparency and rgb 
-    rad = torch.rand(budget, 2, requires_grad=True, device=device)
-    transp = torch.ones(budget, 2, requires_grad=True, device=device)
-    rgb = torch.rand(budget, 3, requires_grad=True, device=device)
-
-    # Put them together 
-    strokes = torch.cat([x0,y0, x, y, x2,y2, rad, transp, rgb], dim=1).requires_grad_()
-
-    return strokes 
-
-def init_coordinates_in_mask(A, N, device):
-    """
-    Given a boolean tensor A of shape [H, W] and an integer N, returns x,y random coordinates over True values of A. 
-    :param A: mask tensor of shape [H, W]
-    :param N: integer
-    """
-    H, W = A.shape # A has a shape [H, W]
-    indices = torch.nonzero(A).t() # Indices of the True values in A, shape is [2, num_True_values]
-    
-    if indices.shape[1] == 0:
-        raise ValueError("Tensor A does not contain any True values.")
-    
-    # Pass torch.ones with length indices to torch.multinomial to have equal probability for each index. 
-    selected_indices = torch.multinomial(torch.ones(indices.shape[1]), N, replacement=True) # Sample N indices from the True values in A, shape is [N]
-    selected_coordinates = indices[:, selected_indices].t() # Select N random (x,y) pairs, shape is [N, 2]
-    x = selected_coordinates[:, 0].to(device) # First column represents x-coordinates, shape is [N]
-    y = selected_coordinates[:, 1].to(device) # Second column represents y-coordinates, shape is [N]
-    
-    return x, y
-
-def filter_strokes(strokes, mask, indices, device):
-    """
-    Filters out strokes that aren't in the mask 
-    :strokes: optimized strokes of shape [budget, M, 13] <- M is the number of patches that have a mask 
-    :mask: list of ALL (>>M) binary masks (length of npatches) of shape [1, 1, 128, 128]
-    :indices: list of integers of len M, with indices corresponding to patches that have True values representing a mask 
-    
-    :returns : padded strokes of shape [budget, npatches, 13], a list with indices that indicate valid patches within the 35, and boolean tensor of shape [budget, npatches]
-    """
-
-    # Double check tthe number of patches that have been optimized correspond to the length of the indices list 
-    assert strokes.shape[1] == len(indices)
-    
-    # This could happen in the main function 
-    mask = torch.cat(mask, dim=0).to(device)
-    mask = torch.index_select(mask, 0, torch.Tensor(indices).int().to(device))
-
-    strokes = strokes.permute(1, 0, 2) # [budget, M, 13]  -> [M, budget, 13]
-    npatches = mask.shape[0] # all patches 
-    budget = strokes.shape[1]
-    
-    # Boolean tensor in the shape (M, budget) to indicate whether strokes are valid or not 
-    valid_strokes_indices = torch.zeros(strokes.shape[0], budget, dtype=torch.bool).to(device)
-    valid_patch_indices = [] # list to cull out unvalid patches
-    valid_strokes = []
-    
-    # Dumb tensor use for padding 
-    dumb_tensor = (torch.ones(13) * -1).to(device) 
-    
-    for i in range(npatches):
-        strokes_patch = strokes[i]
-        mask_patch = mask[i].squeeze() # [H, W]
-
-        #valid_strokes_ids_patch = [] # list to cull out unvalid strokes 
-        valid_strokes_patch = []
-        nonvalid = 0
-        
-        for j in range(budget):
-            stroke = (strokes_patch[j].clip(0, 1) * 127).long()
-            x0, y0 ,x, y, x2, y2, r0, r2, t0, t2, r, g, b = stroke
-            
-            if mask_patch[y0, x0].item() == 0 or mask_patch[y, x].item() == 0 or mask_patch[y2, x2].item() == 0:
-                nonvalid += 1
-                valid_strokes_patch.append(dumb_tensor)
-                continue
-            
-            valid_strokes_indices[i, j] = True
-            valid_strokes_patch.append(strokes_patch[j])
-            #valid_strokes_ids_patch.append(j)
-        
-        print(f'non valid: {nonvalid}/{budget}')
-        valid_strokes_patch = torch.vstack(valid_strokes_patch).to(device) # [all_strokes, 13]
-        valid_strokes.append(valid_strokes_patch)
-
-        # if nonvalid != budget menas that at least there is one valid stroke 
-        if nonvalid != budget:
-            valid_patch_indices.append(indices[i]) # append only the patch that has strokes 
-    
-    if valid_strokes != []:
-        valid_strokes = torch.stack(valid_strokes, dim=0).permute(1,0,2).to(device) # [npatches, budget, 13] -> [budget, npatches, 13]
-    
-    else:
-        print('there are no valid strokes in the entire optimization')
-
-    valid_strokes_indices = valid_strokes_indices.permute(1,0) # [budget, npatches]
-
-    return valid_strokes, valid_patch_indices, valid_strokes_indices
-
-def init_strokes_patches(budget, mode, device, npatches):
-    strokes_l = []
-    for p in range(npatches):
-        strokes = init_strokes(budget, mode, device)
-        strokes_l.append(strokes)
-    
-    return torch.stack(strokes_l, dim=1).detach().requires_grad_() # [budget, npatches, 13]
-
-def init_strokes_boundaries(N, budget, device, boundaries, patches_limits_list):
-    """
-    Initializes b-budget strokes (2-4 max) only on patches that have boundaries (true values)
-    
-    :param N: number of pixels that represent boundaries.
-    
-    :param budget: integer with number of strokes to initialize 
-    
-    :boundaries: alpha boundaries, a tensor of shape [total_num_patches, 1, H, W]
-    
-    :patches_limits_list: a list with total_num_patches tensors 
-
-    return strokes parameters of shape [budget, n_patches, num_params]
-    """
-    indices, selected_tensors, n_total = select_tensors_with_n_true(boundaries, patches_limits_list, N)
-    strokes_l = []
-    
-    for i in range(len(patches_limits_list)):
-        if i in indices:
-            strokes = init_boundary_stroke_params(boundaries[i].squeeze(), budget, device)
-            strokes_l.append(strokes)
-    strokes = torch.stack(strokes_l, dim=1).detach().requires_grad_() # [budget, npatches, 13]
-    
-    return strokes, indices 
-
-
-def remove_transparency(stroke, device, num_params=13):
+def remove_transparency(stroke, num_params=13):
     mask = torch.zeros_like(stroke).to(device)
     if num_params == 13:
         mask[:, 8:10] = 1.0
@@ -835,7 +644,7 @@ def make_transparent(stroke, device, idx):
     stroke = stroke - mask
     return stroke.clip(min=0, max=1)
 
-def clip_width(stroke, num_params, max, device, min=0.01):
+def clip_width(stroke, num_params, max, device=device, min=0.01):
     mask = torch.zeros_like(stroke).to(device)
     mask[:, 6:8] = 1.0
     return torch.where(mask > 0, torch.clamp(stroke, min=min, max=max), stroke)
@@ -857,14 +666,15 @@ def any_column_true(A):
     """
     return torch.any(A, dim=1)
 
-def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_size, renderer):
-    """Render stroke parameters into canvas
+def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_size, mask, renderer):
+    """Render stroke parameters into canvas. 
     
-    :param canvas: [n_patches, 3, 128, 128]
+    :param canvas: A tensor of patches that correspond to a segmentation mask [n_patches, 3, 128, 128]
     :param strokes: [budget, n_patches, num_params]
-    :param patch_indices: len with integers of valid patches, 
+    :param patch_indices: len with integers of valid patches 
     :param stroke_indices: bool [budget, n_patches]
     
+    :param mask: [num_patches, 1, 128, 128]
     """
     strokes = strokes.permute(1,0,2) # [npatches, budget, num_params]
     stroke_indices = stroke_indices.permute(1,0) # [npatches, budget]
@@ -876,21 +686,24 @@ def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_siz
     assert budget == stroke_indices.shape[1]
     assert npatches == stroke_indices.shape[0]
     
-    valid_patches = any_column_true(stroke_indices)
+    valid_patches = any_column_true(stroke_indices) # [npatches]
+
     new_canvases = []
     for i in range(npatches):
         
         if valid_patches[i] != False:
             strokes_patch = strokes[i] # [budget, num_params]
-            
             this_canvas = canvas[i].unsqueeze(0) # [1, 3, 128, 128]
             
+            # canvas here is the same 
             for j in range(budget):
                 stroke_t = strokes_patch[j].unsqueeze(0) # [1, num_params]
-
                 if stroke_indices[i, j]:
-                    this_canvas = forward_renderer(stroke_t, this_canvas, brush_size, num_params, renderer, device)
+                    
+                    assert torch.all(stroke_t != -1), "Wrong stroke, check the filter algorithm"
+                    this_canvas = forward_renderer(stroke_t, this_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0)) # [if passing mask, apply filterwise]
 
+                
             new_canvases.append(this_canvas)
     
     new_canvases = torch.cat(new_canvases, dim=0)
@@ -899,7 +712,7 @@ def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_siz
     return new_canvases 
 
 
-def render(canvas, strokes, budget, brush_size, renderer, num_params=13):
+def render(canvas, strokes, budget, brush_size, renderer, num_params=13, level=None, texturize=False, painter=None, writer=None):
     """Render stroke parameters into canvas
     :param canvas: [n_patches, 3, 128, 128]
     :param strokes: [budget, n_patches, num_params]
@@ -911,22 +724,32 @@ def render(canvas, strokes, budget, brush_size, renderer, num_params=13):
         # Get stroke at timestep t 
         stroke_t = strokes[t]#.unsqueeze(0) # [num_patches, 13]
 
-        # render 
-        canvas = forward_renderer(stroke_t, canvas, brush_size, num_params, renderer, device)
+        if texturize:
+            canvas, stroke, alpha = RU.texturize(stroke_t, canvas, brush_size, t, num_params, writer, painter=painter)
+        else:
+            canvas = forward_renderer(stroke_t, canvas, brush_size, num_params, renderer, device)
+
 
     return canvas, None, None
 
 
-def forward_renderer(stroke, canvas, brush_size, num_params, renderer, device):
+
+
+def forward_renderer(stroke, canvas, brush_size, num_params, renderer, device, mask=None, return_alpha=False):
     """
     Renderer network takes in all stroke parameters except for RGB. Renderer outputs an alpha stroke of 128x128 with a white background. 
     Stroke black, background white 
     :param stroke: strokes that are being optimized, a tensor of shape [total patches, 13]
     :param canvas: all canvases patches, a tensor of shape [total patches, 3, 128, 128]
+    
+    :param mask: Apply pixelwise gate for filtering strokes  
+    
     """
     width = canvas.shape[2]
     i_til_rgb = 10
     
+    original_canvas = canvas.clone()
+
     # Make it opaque and clip width -> Transparency is being controlled by 
     #stroke = remove_transparency(stroke, device, num_params)
     stroke = clip_width(stroke, num_params, max=brush_size, device=device)
@@ -944,8 +767,17 @@ def forward_renderer(stroke, canvas, brush_size, num_params, renderer, device):
     # 1 - alpha = 0 in the stroke regions, and 1 in the background. It zeroes out the canvas at the stroke region and adds canvas with color stroke, whose bckg = 0
     canvas = canvas * (1-alpha) + color_stroke 
     
-    return canvas.clip(min=0, max=1)
+    # return original canvas if the stroke is outside the mask 
+    # TODO: check that we are passing the right mask 
+    if mask != None:
+        result = alpha * mask # [N, 1, 128, 128]
+        if torch.allclose(result, alpha) == False:
+            return original_canvas 
+    
+    if return_alpha:
+        return canvas.clip(min=0, max=1), alpha
 
+    return canvas.clip(min=0, max=1)
 
 # VISUALIZATION AND OTHER UTILITIES ------ 
 
@@ -1027,7 +859,7 @@ def blend_padded_canvas(padded_canvas, source_img, general_canvas, first=False, 
     Blend padded canvas onto the general canvas. First, decrease the size of all 3 tensors 
     :padded_canvas: a tensor of shape [1, C, H, W]
     :source_img: a tensor of shape [1, C, H, W]
-    :general_canvas: a tensor of shape [1, C, H, W]
+    :general_canvas: a tensor of shape [1, C, H, W], this function updates this tensor 
     :first: flat to indicate if it's the first time blending. 
         - If True -> decrease its size
         - If False -> Don't change its size 
@@ -1040,19 +872,21 @@ def blend_padded_canvas(padded_canvas, source_img, general_canvas, first=False, 
         general_canvas = F.interpolate(general_canvas, scale_factor=resize_factor)
 
     # 2. Blend them 
+    # Get alpha to blend 
     alpha = torch.where(n_padded_canvas > 0, 1, 0)  # [1, 3, H, W] White where strokes are, black in the background 
     alpha = alpha[:, 0, :, :].unsqueeze(1) # [1, 1, H, W]
-    #blend_canvas = n_padded_canvas + general_canvas
     general_canvas = general_canvas * (1 - alpha) + n_padded_canvas
 
     return general_canvas, source_img
 
 def blend_all_canvases(canvases, patches_limits, general_canvas, source_img, logger, resize_factor):
     """
-    Blends all canvases into a bigger general_canvas, decrase their sizes for a global loss (CLIP)
+    Blends all canvases by padding them and applying a normal blending formula into a bigger general_canvas, decrase their sizes for a global loss (CLIP)
     :param canvases: a tensor of shape [n_patches, 3, 128, 128]
     :param patches_limits: a list of n_patches tuples of shape ((h_st, h_end), (w_st, w_end))
     :param general_canvas: the global big canvas of shape [1, 3, H, W]
+
+    :returns: decreased general_canvas and source image to compute loss 
     """
 
     N = len(patches_limits)
@@ -1063,11 +897,14 @@ def blend_all_canvases(canvases, patches_limits, general_canvas, source_img, log
         patch_limit = patches_limits[i]
         padded_crop = pad_crop(canvases[i].unsqueeze(0), patch_limit, H, W)
         first = False
+        
         if i == 0:
             logger.add_image(f'padded_canvas_{i}', img_tensor=padded_crop.squeeze(), global_step=0)
             first = True
-       
+
+        # Call the blending function. At the first patch, decrease the size of padded canvas, source image and general canvas.
         general_canvas, n_source_img = blend_padded_canvas(padded_crop, source_img, general_canvas, first=first, resize_factor=resize_factor)
+        
         if first:
             dec_sourc_img = n_source_img
 
@@ -1088,3 +925,61 @@ def compose_general_canvas(args, canvas, mode, patches_limits, npatches_w, gener
         general_canvas = RU.blend_general_canvas(canvas.detach(), general_canvas, args, patches_limits, npatches_w) # self.general_canvas [1, 3, H, W]
 
     return general_canvas
+
+
+
+def order_list_by_index(main_list, index_list):
+    """
+    Orders a list of strings based on the index of another list of strings.
+
+    Args:
+    main_list (list): The list to be ordered.
+    index_list (list): The list containing the order index as strings.
+
+    Returns:
+    list: The ordered list.
+    """
+    index_dict = {index_list[i]: i for i in range(len(index_list))}
+    ordered_list = sorted(main_list, key=lambda x: index_dict.get(x, len(main_list)))
+    return ordered_list
+
+
+def order_two_lists_by_index(list1, list2, index_list):
+    """
+    Orders two lists based on the index of another list.
+
+    Args:
+    list1 (list): The first list to be ordered.
+    list2 (list): The second list to be ordered based on the order of the first list.
+    index_list (list): The list containing the order index.
+
+    Returns:
+    tuple: A tuple containing the ordered lists.
+    """
+
+    index_dict = {index_list[i]: i for i in range(len(index_list))}
+    ordered_list1 = sorted(list1, key=lambda x: index_dict.get(x, len(list1)))
+    
+    
+    pdb.set_trace()
+    ordered_list2 = [list2[index_dict.get(x, len(list1))] for x in ordered_list1]
+    
+    return ordered_list1, ordered_list2
+
+def order_tuple_list_by_index(tuple_list, index_list):
+    """
+    Orders a list of tuples based on the index of another list.
+
+    Args:
+    tuple_list (list): The list of tuples to be ordered based on the first element of each tuple.
+    index_list (list): The list containing the order index.
+
+    Returns:
+    list: The ordered list of tuples.
+    """
+    # if not set(index_list).issubset(set([t[0] for t in tuple_list])):
+    #     raise ValueError("Index list contains invalid elements")
+
+    index_dict = {index_list[i]: i for i in range(len(index_list))}
+    ordered_tuple_list = sorted(tuple_list, key=lambda x: index_dict.get(x[0], len(tuple_list)))
+    return ordered_tuple_list
