@@ -17,6 +17,13 @@ from utils import render_utils as RU
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
+def remove_elements_by_indexes(lst, idxs):
+    # Create a new list that contains elements that are not at the specified indexes
+    new_lst = [lst[i] for i in range(len(lst)) if i not in idxs]
+    
+    return new_lst
+
+
 # IMAGE PROCESING -------------- 
 def resize_tensor(tensor, new_h, new_w):
     # Define the desired output size
@@ -298,6 +305,16 @@ def merge_tensors(tensor_a, tensor_b, indices_a, indices_b):
     return merged_tensor 
 
 
+def check_binary_tensor(tensor, N):
+    # Count the number of True values in the tensor
+    num_true = torch.sum(tensor).item()
+
+    # Check if the number of True values is greater than N
+    if num_true > N:
+        return True
+    else:
+        return False
+
 def select_tensors_with_n_true(tensor_list, limits_list, N):
     """
     Selects indexes of tensors that at least have >= N true/1s values 
@@ -317,7 +334,7 @@ def select_tensors_with_n_true(tensor_list, limits_list, N):
     return selected_tensors_idx, selected_tensors, n_total
 
 
-def get_patches_w_overlap(args, img, npatchesH, npatchesW, writer=None, name='src_img'):
+def get_patches_w_overlap(args, img, npatchesH, npatchesW, writer=None, name='src_img', is_mask=False):
     """
     Scan an image with a step size and stores its corresponding patches
     :param img: general size image of shape [1, C, H, W]
@@ -326,6 +343,7 @@ def get_patches_w_overlap(args, img, npatchesH, npatchesW, writer=None, name='sr
     """
     patches = []
     patches_limits = []  # Also for mask 
+    mask_in_patch = [] # Boolean list to indicate whether there is a mask or not 
     
     for h in range(npatchesH): 
         start_h = max((128 * h) - (args.overlap*h), 0) # so it doesn't get negative numbers
@@ -339,11 +357,18 @@ def get_patches_w_overlap(args, img, npatchesH, npatchesW, writer=None, name='sr
             patches.append(patch)
             patches_limits.append([(start_h,end_h),(start_w,end_w)])
 
+            if is_mask:
+                # Check if this patch has 1s 
+                has_true_values = check_binary_tensor(patch, N=100) # If more than N pixels = True, then returns true 
+                
+                # Add True / False to the list 
+                mask_in_patch.append(has_true_values)
+                
     if writer != None:
         img_grid = torchvision.utils.make_grid(torch.cat(patches,dim=0), nrow=npatchesW)
         writer.add_image(f'{name}_by_patches', img_tensor=img_grid, global_step=0)
     
-    return patches, patches_limits
+    return patches, patches_limits, mask_in_patch
 
 def crop_image(patches_loc, image, return_tensor=True):
     """Given a list of patches boundaries and an image, crops image.
@@ -363,7 +388,40 @@ def crop_image(patches_loc, image, return_tensor=True):
 def is_tensor(var):
     return isinstance(var, torch.Tensor)
 
-def create_N_random_patches(image, N, mask=None, threshold=60, patch_size=128):
+
+def check_patch(mask: torch.Tensor, x: int, y: int, threshold: float) -> bool:
+    """
+    Creates a 128x128 patch around the center point (x, y) and returns true if
+    80% of the pixels of this patch are inside the binary mask.
+    
+    Args:
+    - mask: A binary mask of shape [1, 1, H, W]
+    - x: x-coordinate of the center point
+    - y: y-coordinate of the center point
+    
+    Returns:
+    - A boolean indicating if 80% of the pixels in the patch are inside the mask.
+    """
+    H, W = mask.shape[-2:]
+    half_size = 64
+    patch_top = max(0, y - half_size)
+    patch_left = max(0, x - half_size)
+    patch_bottom = min(H, y + half_size)
+    patch_right = min(W, x + half_size)
+    
+    patch = mask[..., patch_top:patch_bottom, patch_left:patch_right]
+    patch = F.pad(patch, (64 - (x - patch_left), 64 - (y - patch_top),
+                          64 - (patch_right - x), 64 - (patch_bottom - y)))
+    num_pixels_in_patch = 128 * 128
+    num_pixels_in_mask = patch.sum()
+    if num_pixels_in_mask >= threshold * num_pixels_in_patch:
+        return True
+    else:
+        return False
+
+
+
+def create_N_random_patches(image, N, mask=None, threshold=50, patch_size=128):
     """
     Creates a list of N random patches boundaries. Does not return patches itself, just the list of boundaries  
     
@@ -405,7 +463,8 @@ def create_N_random_patches(image, N, mask=None, threshold=60, patch_size=128):
             cy = (start_h + end_h) // 2 # center y coordinate in patch 
 
             # 1 or 0 if patch falls in mask or not 
-            inmask = mask[:,:,cy,cx] # this is either 0 or 1 (inside mask or outside mask)
+            inmask = check_patch(mask, cx, cy, threshold=0.4) # 50% pixels should be in the mask 
+            #inmask = mask[:,:,cy,cx] # this is either 0 or 1 (inside mask or outside mask)
 
             # Do not add proposed patch if outside mask
             if inmask == 0:
@@ -459,112 +518,22 @@ def visualize_progress(canvases, active_canvases, general_canvas, mask, indices)
     return 0 
 
 
-def create_N_random_patches_BU(source_img, N, mask=None, salient_mask=False, threshold=60, patch_size=128):
-    """
-
-    :param source_img: Reference image of shape [1, 3, H, W]
-    :param N: number of patches to create, an integer 
-    :param threshold: max amount of pixels that are allowed to overlap between patches
-    :return: physical patches and internally stores patches limits in self.patches_detail_limits
-    """
-
-    H = source_img.shape[2]
-    W = source_img.shape[3]
-
-    patches_mask = []
-    patches = []
-    patches_limits = []
-    i = 0 # iterations, to check the proportion of successful patches 
-    d = 0 # number of ditched patches
-    
-    if salient_mask:
-        mask = mask.clone() # this copy will be updated so that we avoid patch repetition
-
-    # Loop to keep adding patches until we reach the number we want 
-    while len(patches) != N: 
-        # Create patches from upper left coordinate 
-        xcoord = int(torch.randint(W - patch_size, ()))
-        ycoord = int(torch.randint(H - patch_size, ()))
-
-        # Coordinates of the random patch 
-        start_w = xcoord
-        end_w = xcoord + patch_size
-        start_h = ycoord
-        end_h = ycoord + patch_size
-        
-        if salient_mask:
-            # This approach gets patches based on whether center point of random patch falls within the mask
-            
-            # Get center coordinates of the patch, and check if center point falls inside the mask. If not, do not add it. 
-            cx = (start_w + end_w) // 2 # center x coordinate in patch 
-            cy = (start_h + end_h) // 2 # center y coordinate in patch 
-
-            # 1 or 0 if patch falls in mask or not 
-            inmask = mask[:,:,cy,cx] # this is either 0 or 1 (inside mask or outside mask)
-
-            # Do not add proposed patch if outside mask
-            if inmask == 0:
-                i += 1
-                d += 1
-                if i > 500: break # this is just a gate to avoid having an infine tries here 
-                # Go back up the loop 
-                continue 
-
-        # Check for overlaps: iterate over the existing list of patches coordinates and check if they overlap. If they do for more than the overlap hp, don't include them         
-        if i > 0:
-            ditch = False
-            for j in range(len(patches_limits)): 
-                (min_y_prev, max_y_prev), (min_x_prev, max_x_prev) = patches_limits[j]
-                
-                if abs(start_w - min_x_prev) < threshold and abs(start_h - min_y_prev) < threshold:
-                    ditch = True
-                    d += 1
-                    break # break the loop as soon as there is one patch that overlaps.
-
-            # add one in the counter and continue in the loop 
-            if ditch == True:
-                i += 1
-                if i > 500: break
-                else:
-                    continue
-        
-        # Crop patch and append 
-        patch = source_img[:, :, start_h:end_h, start_w:end_w]
-        patches.append(patch)
-        patches_limits.append([(start_h, end_h), (start_w, end_w)])
-
-        if salient_mask:
-            patch_mask = mask[:, :, start_h:end_h, start_w:end_w]
-            patches_mask.append(patch_mask)
-
-            # Update mask so that it does not repeat patches
-            mask[:, :, start_h:end_h, start_w:end_w] = 0 
-
-        #print(f'i: {i}, len patches: {len(patches)}')
-        i += 1
-
-    print(f'i: {i}, TOTAL NUMBER OF RANDOM PATCHES: {len(patches)}, number of ditched patches: {d}')
-    
-    if salient_mask:
-        return patches, patches_limits, patches_mask 
-    
-    return patches, patches_limits, None
-
-
-def high_error_candidates(canvas, patches_list, patches_loc_list, level,  num_patches_this_level):
+def high_error_candidates(canvas, patches_list, patches_loc_list, level, num_patches_this_level, name=''):
     """
     Resets the number of total patches based on how many quasi non-overlapping patches we can find
+
     :param canvas: [1, 3, H, W] general canvas
-    :param patches_loc_list: list with coordinate patches tuples (start_h, end_h), (start_w, end_w)
-    :param patches_list: list with patches of shape [3, 128, 128]
-    :return: 
+    :param patches_loc_list: list of length N with coordinate patches tuples (start_h, end_h), (start_w, end_w)
+    :param patches_list: list of length N (from get random N patches) with patches of shape [3, 128, 128]
+    
+    :return: filtered selected patches 
     """
 
     # 1) crop canvas with patches loc
     # 2) calculate error maps
     # 3) sort and select topk
     
-    patches = [] # get patches from canvas 
+    patches = [] # crops patches from canvas 
     for i in range(len(patches_loc_list)):
         (start_h, end_h), (start_w, end_w) = patches_loc_list[i]
         patch = canvas[:, :, start_h:end_h, start_w:end_w]
@@ -580,50 +549,72 @@ def high_error_candidates(canvas, patches_list, patches_loc_list, level,  num_pa
     k = num_patches_this_level
 
     # if number hp patches at this level is higher than the actual amount of patches, limit the number of hp patches 
-    if k >= len(errors): 
-        k = len(errors) - 1
+    if k > len(errors): 
+        k = len(errors) #- 1
     total_number_patches = k
 
     values, indices = torch.topk(errors, k=k)
     selected_patches_loc = [*map(patches_loc_list.__getitem__, indices.tolist())] # list with the selected patches limits (I think it replaces a loop)
     selected_patches_img = torch.index_select(patches_img, 0, indices).to(device) # select patches based on indixes along dimension 0 
-
+    # if name == 'person':
+    #     pdb.set_trace()
     return selected_patches_loc, selected_patches_img, indices, values
 
-def get_natural_patches(number_uniform_patches, source_img, general_canvas, logger, level, mask, salient_mask, boundaries, number_natural_patches, path=None):
+def get_natural_patches(number_uniform_patches, source_img, general_canvas, logger, level, mask, K_number_natural_patches, path=None, name=''):
     """
-    Gets source_image patches with a high-error map algorithm.
-    boundaries is a tensor of shape [C, H, W]
+    Gets source_image patches with a high-error map algorithm and returns those patches, their location, indices of where they are, 
+    error value and mask patches if there is any mask 
+
+    Args 
+        number_uniform_patches: int 
+        source_img:     a tensor of shape [1, 3, H, W]
+        general_canvas: a tensor of shape [1, 3, H, W]
+        level: an int indicating the painting level 
+        mask:           a tensor of shape [1, 1, H, W]
+        K_number_natural_patches: an int 
+
+    Returns: the top N high-est error target patches, their location, selected indices and values, and the mask patches
     """
-    # 1) Get random patches 
-    num_patches = int(number_uniform_patches / 1.2) # slightly fewer patches than the amount of uniform patches 
-
-    # Get list of patches limits 
-    list_patches_limits = create_N_random_patches(source_img, num_patches, mask=mask)
-
-    # Get source image patches 
-    list_natural_src_patches = crop_image(list_patches_limits, source_img, return_tensor=False)
+    print(f'\n Getting natural patches: {name}')
     
-    #list_natural_src_patches, list_patches_limits, list_mask_patches = create_N_random_patches(source_img, num_patches, mask=mask, salient_mask=salient_mask)
+    # 1) Start with a slightly smaller number P, than the uniform approach 
+    num_patches = int(number_uniform_patches / 1.2)
+    
+    # Generate a list of valid patches T < P which if a mask is provided, they have to fall within the mask. 
+    list_patches_locations = create_N_random_patches(source_img, num_patches, mask=mask) # list with lists of tuples 
 
+    # Crop those patches in the source image 
+    list_natural_src_patches = crop_image(list_patches_locations, source_img, return_tensor=False)
+    
     # 2) Pseudo-Attention: compute high level error between the list of patches and sort them to paint it by priority 
     print(f'Calculating high error candidates')
-    patches_limits, target_patches, indices, values = high_error_candidates(general_canvas, list_natural_src_patches, list_patches_limits, 
-                                                                                     level, number_natural_patches)
-
-    mask_patches, boundaries_patches = None, None
-    if salient_mask:
-        mask_patches = crop_image(list_patches_limits, mask, return_tensor=True)
-        mask_patches = torch.index_select(mask_patches, 0, indices) # [k, 1, 128, 128]
-
-    if boundaries != None:
-        boundaries_patches = crop_image(list_patches_limits, boundaries, return_tensor=True).to(device)
-        boundaries_patches = torch.index_select(boundaries_patches, 0, indices.to(device)) # [k, 1, 128, 128]
-
-    draw_bboxes(general_canvas, patches_limits, level, logger, canvas=True, path=path)
-    draw_bboxes(source_img, patches_limits, level, logger, canvas=False, path=path)   # [npatches, 3, 128,128]
     
-    return target_patches, patches_limits, indices, values, mask_patches, boundaries_patches 
+    if list_patches_locations == []:
+        print(f'No patches for this {name} mask')
+        return -1, -1, -1, -1, -1
+    
+    print(f'\nName: {name}, num_natural_patches: {K_number_natural_patches}')
+    # 3) Crops those patches in the general canvas and calculate error between them, return maximum K_number_natural_patches
+    patches_limits, target_patches, indices, values = high_error_candidates(general_canvas, list_natural_src_patches, list_patches_locations, 
+                                                                            level, K_number_natural_patches, name)
+    
+    if patches_limits == []:
+        print(f'No patches for this {name} mask after calculating high error candidates')
+        return -1, -1, -1, -1, -1   
+    
+    # Note: indices correspond to the selected indices from the pre-selection given by list_patches_locations
+    mask_patches = None
+    if mask != None:
+        # mask_patches = crop_image(list_patches_locations, mask, return_tensor=True).to(device)
+        # mask_patches = torch.index_select(mask_patches, 0, indices.to(device))  # [k, 1, 128, 128]
+        mask_patches = crop_image(patches_limits, mask, return_tensor=True).to(device)
+        #pdb.set_trace()
+
+    # Log boxes in canvas and source image  
+    draw_bboxes(general_canvas, patches_limits, level, logger, name, canvas=True, path=path)
+    draw_bboxes(source_img, patches_limits, level, logger, name, canvas=False, path=path)   # [npatches, 3, 128,128]
+    
+    return target_patches, patches_limits, indices, values, mask_patches 
 
 
 # STROKES UTILITIES -------------- 
@@ -703,13 +694,17 @@ def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_siz
                     assert torch.all(stroke_t != -1), "Wrong stroke, check the filter algorithm"
                     this_canvas = forward_renderer(stroke_t, this_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0)) # [if passing mask, apply filterwise]
 
-                
             new_canvases.append(this_canvas)
     
-    new_canvases = torch.cat(new_canvases, dim=0)
-    assert new_canvases.shape[0] == len(patch_indices)
-
-    return new_canvases 
+    if new_canvases != []:
+        new_canvases = torch.cat(new_canvases, dim=0)
+        assert new_canvases.shape[0] == len(patch_indices)
+        successful = True
+    else:
+        new_canvases = canvas
+        successful = False
+    
+    return new_canvases, successful
 
 
 def render(canvas, strokes, budget, brush_size, renderer, num_params=13, level=None, texturize=False, painter=None, writer=None):
@@ -781,7 +776,7 @@ def forward_renderer(stroke, canvas, brush_size, num_params, renderer, device, m
 
 # VISUALIZATION AND OTHER UTILITIES ------ 
 
-def draw_bboxes(img, boxes_loc, level, writer, canvas=True, path=None):
+def draw_bboxes(img, boxes_loc, level, writer, name, canvas=True, path=None):
     img = img.clone()
     #print(f'Drawing bboxes, img shape: {img.shape}. Canvas? {canvas}')
 
@@ -823,9 +818,9 @@ def draw_bboxes(img, boxes_loc, level, writer, canvas=True, path=None):
         img[:, 2, h_st:h_end, w_end - thick:w_end] = B #0
 
     if canvas:
-        writer.add_image(f'high_error_canvas_level_{level}', img_tensor=img.squeeze(), global_step=0)
+        writer.add_image(f'high_error_canvas_{name}_level_{level}', img_tensor=img.squeeze(), global_step=0)
     else:
-        writer.add_image(f'high_error_ref_img_level_{level}', img_tensor=img.squeeze(), global_step=0)
+        writer.add_image(f'high_error_ref_img_{name}_level_{level}', img_tensor=img.squeeze(), global_step=0)
 
     if path != None:
         img_name = f'high_error_canvas_level_{level}.png'

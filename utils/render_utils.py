@@ -179,7 +179,7 @@ def blend_general_canvas_natural(canvas, patches_limits, general_canvas, blendin
     :param canvas: [n_patches, 3, 128, 128]
     :return:
     """        
-    kanvas = general_canvas # to shorten the name 
+    kanvas = general_canvas 
     
     # iterate over all patches and paste them patch by patch
     for i in range(len(patches_limits)):
@@ -220,11 +220,9 @@ def blend_general_canvas_natural(canvas, patches_limits, general_canvas, blendin
 
         # Directly pastes the center of the patch onto the general canvas (does not blend it)
         kanvas[:,:, h_st+ov:h_end-ov, w_st+ov:w_end-ov] = curr_canvas[:, ov:128-ov, ov:128-ov]
-
-    # Visualize and write in logger
-    #writer.add_image(f'general_canvas_texture_{texture}', img_tensor=kanvas.squeeze(0), global_step=0)
-
+        
     return kanvas 
+
 
 
 def blend_diff(crops, patches_limits, general_canvas, alpha=1.0):

@@ -21,7 +21,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 
-def create_grid_strokes(budget, num_params, device, std = 0.05):
+def create_grid_strokes(budget, num_params, patch, device, std = 0.2):
     """
     Creates a grid of strokes evenly distributed on the canvas. 
     
@@ -57,14 +57,15 @@ def create_grid_strokes(budget, num_params, device, std = 0.05):
     # Other parameters: radius, transparency and rgb 
     rad = torch.rand(budget, 2, requires_grad=True, device=device)
     transp = torch.ones(budget, 2, requires_grad=True, device=device)
-    rgb = torch.rand(budget, 3, requires_grad=True, device=device)
+    #rgb = torch.rand(budget, 3, requires_grad=True, device=device)
+    rgb = (torch.ones(budget, 3, requires_grad=True, device=device) * (patch[:, (x*128).squeeze().long(), (y*128).squeeze().long()]).permute(1,0)).float()
 
     # Put them together 
     strokes = torch.cat([x0,y0, x, y, x2,y2, rad, transp, rgb], dim=1).requires_grad_()
 
     return strokes 
 
-def init_strokes(budget, mode, device, num_params=13):
+def init_strokes(budget, mode, device, target_patch, num_params=13):
     """
     Initializes random strokes parameters on a canvas given a budget
     """
@@ -73,7 +74,7 @@ def init_strokes(budget, mode, device, num_params=13):
         strokes = torch.rand(budget, num_params, requires_grad=True, device=device)
     
     elif mode == 'grid':
-        strokes = create_grid_strokes(budget, num_params, device)
+        strokes = create_grid_strokes(budget, num_params, target_patch, device)
 
     return strokes 
 
@@ -129,15 +130,15 @@ def init_coordinates_in_mask(A, N, device):
     
     return x, y
 
-def init_strokes_patches(budget, mode, device, npatches):
+def init_strokes_patches(budget, mode, device, npatches, target_patches):
     strokes_l = []
     for p in range(npatches):
-        strokes = init_strokes(budget, mode, device)
+        strokes = init_strokes(budget, mode, device, target_patches[p])
         strokes_l.append(strokes)
     
     return torch.stack(strokes_l, dim=1).detach().requires_grad_() # [budget, npatches, 13]
 
-def init_strokes_with_mask(N, budget, device, mask_or_edges, patches_limits_list, patches, edges=False):
+def init_strokes_with_mask(N, budget, device, mask_or_edges, patches_limits_list, patches, edges=False, name=''):
     """
     Initializes b-budget strokes (2-4 max) only on patches that have masks (or boundaries) (true values)
     
@@ -151,7 +152,7 @@ def init_strokes_with_mask(N, budget, device, mask_or_edges, patches_limits_list
 
     return strokes parameters of shape [budget, n_patches, num_params], and indices 
     """
-    # Select patches that have a mask 
+    # Within mask patches, filter out those that have less than N pixels set to True 
     indices, selected_tensors, n_total = utils.select_tensors_with_n_true(mask_or_edges, patches_limits_list, N)
     strokes_l = []
     
@@ -159,6 +160,7 @@ def init_strokes_with_mask(N, budget, device, mask_or_edges, patches_limits_list
         if i in indices:
             strokes = init_boundary_stroke_params(mask_or_edges[i].squeeze(), patches[i], budget, device, std=0.05)
             strokes_l.append(strokes)
+    
     strokes = torch.stack(strokes_l, dim=1).detach().requires_grad_() # [budget, npatches, 13]
     
     return strokes, indices 

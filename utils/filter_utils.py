@@ -120,12 +120,16 @@ def check_mask_overlap(A, B, threshold=0.5):
         return False
 
 
-def filter_strokes(target_patches, strokes, mask, indices, brush_size, renderer, logger, device, debug=False):
+def filter_strokes(target_patches, strokes, mask, indices, brush_size, renderer, logger, device, mode, debug=False):
     """
     Filters out strokes that aren't in the mask 
+    
     :target patches: a tensor of shape [N, 3, 128, 128] where N is >> M and is all the patches
+    
     :strokes: optimized strokes of shape [budget, M, 13] <- M is the number of patches that have a mask 
+    
     :mask: tensor of shape [M, 1, 128, 128] <- M is the number of patches corresponding to a mask 
+    
     :indices: list of integers of len M, with indices corresponding to patches that have True values representing a mask 
     
     :returns : padded strokes of shape [budget, npatches, 13], a list with indices that indicate valid patches within the 35, and boolean tensor of shape [budget, npatches]
@@ -156,7 +160,11 @@ def filter_strokes(target_patches, strokes, mask, indices, brush_size, renderer,
     for i in range(npatches):
 
         # Set up patches 
-        target_patch = target_patches[indices[i]].unsqueeze(0) # [3, 128, 128]
+        if mode == 'uniform':
+            target_patch = target_patches[indices[i]].unsqueeze(0) # [3, 128, 128]
+        else:
+            target_patch = target_patches
+        
         strokes_patch = strokes[i] # [budget, 13]
         mask_patch = mask[i].squeeze() # [H, W]
         
