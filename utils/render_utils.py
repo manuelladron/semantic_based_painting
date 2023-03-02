@@ -12,38 +12,41 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 def _forward_pass_l2p_alpha(action, num_params, renderer):
-        action = action.view(-1, 10 + 3)  # [480, 13]
-        action = utils.remove_transparency(action, num_params)
-        stroke = 1 - renderer(action[:,:10])
-        stroke = stroke.view(-1, 128, 128, 1)  # [480, 128, 128, 1]
-        stroke = stroke.permute(0, 3, 1, 2)  # [480, 1, 128, 128]
-        stroke = stroke.view(-1, 1, 128, 128)  # [batch, 1, 128, 128]
+    i_til_rgb = 10
+    #action = utils.remove_transparency(action, num_params)
+    stroke = 1 - renderer(action[:, :i_til_rgb]).unsqueeze(1) # [1, 128, 128] -> [1, 1, 128, 128]
+    return stroke.repeat(1,3,1,1) # returns alpha with 3 channels
 
-        return stroke.repeat(1,3,1,1) # returns alpha with 3 channels
-
-def texturize(strokes, canvases, brush_size, t, num_params, writer, onehot=None, mask_patches=None, painter=None):
+def texturize(strokes, canvases, brush_size, t, num_params, writer, level, onehot=None, mask_patches=None, painter=None, segm_name=''):
     """
     Processes textures stroke by stroke
-    :param strokes: [n_patches, 13]
-    :param canvases: [n_patches, 3, 128, 128]
-    onehot is [npatches]
-    :return:
+
+    Args:
+        strokes: [n_patches, 13], t-th stroke in every patch 
+        canvases: [n_patches, 3, 128, 128]
+        brush_size: float to cap max brushsize
+        t: index in the stroke budget 
+        num_params: int, 13 if bezier 
+
+        :return: texturized canvases 
     """
     valid_strokes = 0
     invalid_strokes = 0
-    strokes = utils.remove_transparency(strokes, num_params=num_params)
+    #strokes = utils.remove_transparency(strokes, num_params=num_params)
     strokes = utils.clip_width(strokes, num_params, max=brush_size)
+    
     # iterate over patches and apply texture one by one
     alphas, foregrounds = [], []
-
-    for p in range(strokes.shape[0]): # Iterate over patches. Single stroke here
-        
-        # 
-        canvas = canvases[p] # [3, 128, 128]
+    npatches = strokes.shape[0]
+    
+    for p in range(npatches): # Iterate over patches. Single stroke here
+        canvas = canvases[p]             # [3, 128, 128]
         stroke = strokes[p].unsqueeze(0) # [1, 13]
 
-        foreground, alpha = texturizer(painter, writer, stroke, 128, p, t)
+        # Get texturized stroke
+        foreground, alpha = texturizer(painter, writer, stroke, 128, p, t, level, segm_name=segm_name)
 
+        # Update canvas patch 
         canvas = canvas * (1 - alpha) + (foreground * alpha)  # [3, 128, 128]
 
         writer.add_image(f'stroke_text', img_tensor=foreground, global_step=p)
@@ -53,7 +56,7 @@ def texturize(strokes, canvases, brush_size, t, num_params, writer, onehot=None,
         alphas.append(alpha)
         foregrounds.append(foreground)
         #self.all_texturized_strokes.append(canvas)
-        valid_strokes += 1
+        # valid_strokes += 1
 
     # print(f'Invalid strokes in level {level}: {invalid_strokes}')
     # print(f'Valid strokes in level {level}: {valid_strokes}')
@@ -195,7 +198,6 @@ def blend_general_canvas_natural(canvas, patches_limits, general_canvas, blendin
         if blendin:
             ov = 20
             t = torch.linspace(0, 1, steps=ov).to(device)
-            
             # Right side of patch
             patch = (kanvas[:, :, h_st:h_end, w_end-ov:w_end] * t) + \
                     (curr_canvas[:, :, -ov:] * (1 - t))  # [3, 128, 20]
@@ -220,7 +222,7 @@ def blend_general_canvas_natural(canvas, patches_limits, general_canvas, blendin
 
         # Directly pastes the center of the patch onto the general canvas (does not blend it)
         kanvas[:,:, h_st+ov:h_end-ov, w_st+ov:w_end-ov] = curr_canvas[:, ov:128-ov, ov:128-ov]
-        
+
     return kanvas 
 
 
@@ -322,7 +324,7 @@ def calculate_euclidean_dist(c0, c1):
     euclidean_dist = torch.sqrt(sum_sq)
     return euclidean_dist
 
-def texturizer(painter, writer, stroke_param, canvas_size, patch, time):
+def texturizer(painter, writer, stroke_param, canvas_size, patch, time, level, segm_name=''):
     """
     Apply texture stroke by stroke. Depending on the shape of the stroke, will apply texture in different ways
     :param painter: 
@@ -332,7 +334,12 @@ def texturizer(painter, writer, stroke_param, canvas_size, patch, time):
     :param brush_size:   varies
     :return: 
     """
-    t1 = '../../painting_tools/brushes/noshape_light.png'
+    #print(f'segm_name: {segm_name}')
+    if segm_name == 'sky' or level == 0:
+        t1 = '../../painting_tools/brushes/noshape_light_more.png'
+    else:
+        t1 = '../../painting_tools/brushes/noshape_light.png'
+    
     # t1 = '../painting_tools/brushes/brush_large_vertical_clean2.png'
     # t2 = '../painting_tools/brushes/acrylic_w2.png'
     # t3 = '../painting_tools/brushes/oil_bump.png'
@@ -398,6 +405,7 @@ def add_linear_texture(painter, stroke_param, canvas_size, texture_path, center_
     Function that rotates and translates bitmap according to stroke parameters.
     Center point is [1, 2], and it is the target of translation.
     """
+    # Read texture bitmap 
     img = cv2.imread(texture_path, cv2.IMREAD_COLOR)[:, :, ::-1]
     img = cv2.resize(img, (canvas_size, canvas_size), interpolation=cv2.INTER_AREA)  # [128,128,3] uint8 [0-255]
 
@@ -471,12 +479,11 @@ def add_linear_texture(painter, stroke_param, canvas_size, texture_path, center_
     # text_alpha_np = (transl*255).squeeze().permute(1, 2, 0).detach().cpu().numpy().astype(np.uint8)  # [H,W,3]
     text_alpha_np = (transl).squeeze().permute(1, 2, 0).detach().cpu().numpy()  # [H,W,3]
     text_alpha = text_alpha_np.copy()
-    # Blend it
-    R, G, B = stroke_param[0, 10], stroke_param[0, 11], stroke_param[0, 12]
 
+    # Set color 
+    R, G, B = stroke_param[0, 10], stroke_param[0, 11], stroke_param[0, 12]
     text_alpha_np[:, :, 0] = text_alpha_np[:, :, 0] * R.item()  # [3, 128, 128]
     text_alpha_np[:, :, 1] = text_alpha_np[:, :, 1] * G.item()  # text alpha is in [0-255], multiplied by 0.4 gives us
-    # intensity of the color
     text_alpha_np[:, :, 2] = text_alpha_np[:, :, 2] * B.item()
 
     foreground = cv2.dilate(text_alpha_np, np.ones([2, 2]))

@@ -100,11 +100,11 @@ def optimization_loop(args, src_img, opt_steps, target_patches, prev_canvas, str
                 if args.w_perc > 0:
                     loss_utils.log_losses(logger, 'perc loss', perc_loss, i, opt_steps, level)
 
-    return canvas, general_canvas
+    return canvas, general_canvas, strokes
 
 
 
-def optimization_loop_boundaries(args, src_img, opt_steps, target_patches, prev_canvas, 
+def optimization_loop_mask(args, src_img, opt_steps, target_patches, prev_canvas, 
                                 strokes, budget, brush_size, patches_limits, npatches_w, 
                                 level, mode, general_canvas, optimizer, renderer, num_params, 
                                 logger, perc_net, indices, global_loss=False, name='boundaries', mask=None):
@@ -138,8 +138,7 @@ def optimization_loop_boundaries(args, src_img, opt_steps, target_patches, prev_
     total_number_of_indices = prev_canvas.shape[0]
     indices_no_boundaries = list(set(range(total_number_of_indices)) - set(indices))
 
-    # Optimization loop  
-    #pdb.set_trace()           
+    # Optimization loop          
     for i in range(opt_steps):
         
         # Reset canvas variable at each iteration: Get previous canvas as canvas 

@@ -14,8 +14,14 @@ import torchvision
 from colour import Color
 from src.segmentation import segment_image
 from utils import render_utils as RU
+from torchvision.utils import save_image
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+def save_img(image, dirpath, img_name):
+    img_name_complete = os.path.join(dirpath, img_name)
+    save_image(image, img_name_complete)
+
 
 def remove_elements_by_indexes(lst, idxs):
     # Create a new list that contains elements that are not at the specified indexes
@@ -605,10 +611,8 @@ def get_natural_patches(number_uniform_patches, source_img, general_canvas, logg
     # Note: indices correspond to the selected indices from the pre-selection given by list_patches_locations
     mask_patches = None
     if mask != None:
-        # mask_patches = crop_image(list_patches_locations, mask, return_tensor=True).to(device)
-        # mask_patches = torch.index_select(mask_patches, 0, indices.to(device))  # [k, 1, 128, 128]
         mask_patches = crop_image(patches_limits, mask, return_tensor=True).to(device)
-        #pdb.set_trace()
+
 
     # Log boxes in canvas and source image  
     draw_bboxes(general_canvas, patches_limits, level, logger, name, canvas=True, path=path)
@@ -657,8 +661,10 @@ def any_column_true(A):
     """
     return torch.any(A, dim=1)
 
-def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_size, mask, renderer):
-    """Render stroke parameters into canvas. 
+def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_size, mask, 
+                        renderer, level, writer=None, texturize=False, painter=None, segm_name='', second_canvas=None, third_canvas=None):
+    
+    """Render stroke parameters into canvas, and optionally into a second canvas (for segmentation masks)
     
     :param canvas: A tensor of patches that correspond to a segmentation mask [n_patches, 3, 128, 128]
     :param strokes: [budget, n_patches, num_params]
@@ -680,34 +686,73 @@ def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_siz
     valid_patches = any_column_true(stroke_indices) # [npatches]
 
     new_canvases = []
+    new_second_canvases = []
+    new_third_canvases = []
+
     for i in range(npatches):
         
+        # Patch with at least one valid stroke 
         if valid_patches[i] != False:
-            strokes_patch = strokes[i] # [budget, num_params]
-            this_canvas = canvas[i].unsqueeze(0) # [1, 3, 128, 128]
             
+            strokes_patch = strokes[i] # [budget, num_params]
+            
+            this_canvas = canvas[i].unsqueeze(0) # [1, 3, 128, 128]
+            if second_canvas != None:
+                this_second_canvas = second_canvas[i].unsqueeze(0)
+            if third_canvas != None:
+                this_third_canvas = third_canvas[i].unsqueeze(0)
+
             # canvas here is the same 
             for j in range(budget):
                 stroke_t = strokes_patch[j].unsqueeze(0) # [1, num_params]
+                
+                # This is a valid stroke and should be within the mask 
                 if stroke_indices[i, j]:
-                    
-                    assert torch.all(stroke_t != -1), "Wrong stroke, check the filter algorithm"
-                    this_canvas = forward_renderer(stroke_t, this_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0)) # [if passing mask, apply filterwise]
+                    assert torch.all(stroke_t != -1), "Wrong stroke, check the filter algorithm" # Double check it's not a bad stroke 
 
+                    if texturize:
+                        this_canvas, _ ,_ = RU.texturize(stroke_t, this_canvas, brush_size, j, num_params, writer, level, painter=painter, segm_name=segm_name)
+                        if second_canvas != None:
+                            this_second_canvas, _ ,_ = RU.texturize(stroke_t, this_second_canvas, brush_size, j, num_params, writer, level, painter=painter, segm_name=segm_name)
+                        if third_canvas != None:
+                            this_third_canvas, _ ,_ = RU.texturize(stroke_t, this_third_canvas, brush_size, j, num_params, writer, level, painter=painter, segm_name=segm_name)
+                    
+                    else:
+                        this_canvas = forward_renderer(stroke_t, this_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0)) # [if passing mask, apply filterwise]
+                        if second_canvas != None:
+                            this_second_canvas = forward_renderer(stroke_t, this_second_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0)) # [if passing mask, apply filterwise]
+                        if third_canvas != None:
+                            this_third_canvas = forward_renderer(stroke_t, this_third_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0)) # [if passing mask, apply filterwise]
+            
             new_canvases.append(this_canvas)
+            
+            if second_canvas != None:
+                new_second_canvases.append(this_second_canvas)
+            if third_canvas != None:
+                new_third_canvases.append(this_third_canvas)
     
     if new_canvases != []:
         new_canvases = torch.cat(new_canvases, dim=0)
         assert new_canvases.shape[0] == len(patch_indices)
         successful = True
+
+        if new_second_canvases != []:
+            new_second_canvases = torch.cat(new_second_canvases, dim=0)
+        if new_third_canvases != []:
+            new_third_canvases = torch.cat(new_third_canvases, dim=0)
     else:
         new_canvases = canvas
         successful = False
+
+        if second_canvas != None:
+            new_second_canvases = second_canvas
+        if third_canvas != None:
+            new_third_canvases = third_canvas
     
-    return new_canvases, successful
+    return new_canvases, successful, new_second_canvases, new_third_canvases
 
 
-def render(canvas, strokes, budget, brush_size, renderer, num_params=13, level=None, texturize=False, painter=None, writer=None):
+def render(canvas, strokes, budget, brush_size, renderer, num_params=13, level=None, texturize=False, painter=None, writer=None, segm_name=''):
     """Render stroke parameters into canvas
     :param canvas: [n_patches, 3, 128, 128]
     :param strokes: [budget, n_patches, num_params]
@@ -720,7 +765,8 @@ def render(canvas, strokes, budget, brush_size, renderer, num_params=13, level=N
         stroke_t = strokes[t]#.unsqueeze(0) # [num_patches, 13]
 
         if texturize:
-            canvas, stroke, alpha = RU.texturize(stroke_t, canvas, brush_size, t, num_params, writer, painter=painter)
+            canvas, _ ,_ = RU.texturize(stroke_t, canvas, brush_size, t, num_params, writer, level, painter=painter, segm_name=segm_name)
+        
         else:
             canvas = forward_renderer(stroke_t, canvas, brush_size, num_params, renderer, device)
 
@@ -823,9 +869,14 @@ def draw_bboxes(img, boxes_loc, level, writer, name, canvas=True, path=None):
         writer.add_image(f'high_error_ref_img_{name}_level_{level}', img_tensor=img.squeeze(), global_step=0)
 
     if path != None:
-        img_name = f'high_error_canvas_level_{level}.png'
+        if canvas:
+            img_name = f'high_error_canvas_{name}_level_{level}.jpg'
+        else:
+            img_name= f'high_error_src_img_{name}_level_{level}.jpg'
+        
         img_name_complete = os.path.join(path, img_name)
         save_image(img.squeeze(), img_name_complete)
+
 
 
 def pad_crop(crop, patch_limit, H, W):
