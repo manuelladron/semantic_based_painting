@@ -30,7 +30,7 @@ class Painter():
         # Logger 
         self.logger = utils.init_logger(args)
 
-        self.segm_budget = {'sky':9, 'mountain':9, 'sea':49, 'rock': 9, 'dirt':81, 'tree':36, 'roof':16, 'road':36, 'person':25, 'pavement':36, 'house': 16, 'car':9, 'bicycle':9, 'backpack':4, 'potted plant': 16, 'light': 9, 'curtain':16, 'water':64, 'boat': 16 'chair':25, 'rug':9, 'dining table': 25}
+        self.segm_budget = {'sky':9, 'mountain':9, 'sea':49, 'rock': 9, 'dirt':81, 'tree':36, 'roof':16, 'road':36, 'person':25, 'pavement':36, 'house': 16, 'car':9, 'bicycle':9, 'backpack':4, 'potted plant': 16, 'light': 9, 'curtain':16, 'water':64, 'boat': 16, 'chair':25, 'rug':9, 'dining table': 25}
         self.segm_order = ['background','sky', 'mountain', 'sea', 'rock', 'building', 'house', 'pavement', 'wall', 'roof', 'floor', 'dirt', 'road', 'water', 'grass',  'window', 'curtain', 'tree', 'fence', 'light', 'car', 'bus', 'boat', 'rug', 'bicycle', 'chair', 'dining table', 'person', 'backpack', 'potted plant']
     
         # Create dictionary that maps ids to names 
@@ -369,7 +369,7 @@ class Painter():
         
         # 2) Select the canvases we want to keep painting according to high error maps. Crop again from general canvas because this contains previous layers. 
         # The difference with uniform is that at each layer k, natural patches are different whereas uniform patches are the same all throught layers 
-        if mode == 'natural' and self.args.patch_strategy_detail == 'natural':
+        if mode == 'natural': # and self.args.patch_strategy_detail == 'natural':
             
             # We iterate over patches limits as they correspond to different masks 
             if self.args.use_segmentation_mask:
@@ -497,14 +497,20 @@ class Painter():
                                                                     self.renderer, self.num_params, self.logger, self.perc, mask_indices, global_loss=False, 
                                                                     name=name, mask=mask) 
                 
+
                 # mask_strokes contain fewer patches than the uniform--all--canvases, so we first need to select the canvases following indices where mask == True
                 if mode == 'uniform':
                     # Select canvases from previous canvases where mask == True 
                     canvas_selected = torch.index_select(prev_canvas, 0, torch.Tensor(mask_indices).int().to(device))
-
-                else:
-                    canvas_selected = canvas_mask
-
+                    if self.args.texturize:
+                        canvas_selected_text = torch.index_select(prev_canvas_text, 0, torch.Tensor(mask_indices).int().to(device)) # [M, C, H, W] M << N
+                
+                else:   
+                    # This is a placeholder, there is no selection here, we are just optimizing as many patches as high error patches there are
+                    canvas_selected = canvas_mask 
+                    if self.args.texturize:
+                        canvas_selected_text, _, _  = utils.render(prev_canvas_text, strokes, budget, brush_size, self.renderer, self.num_params, level, texturize=True, painter=self, writer=self.logger, segm_name=name)
+                
                 # Filter out unvaid strokes that might have drawn (partially) outside the masks. 
                 if self.args.filter_strokes:
                     
@@ -536,6 +542,7 @@ class Painter():
                     # These 2 lines are for when we are not returning process canvases       
                     black_canvas_patches = None
                     black_canvas_process_patches = None
+                    
                     if self.args.return_segmented_areas:
                         
                         # For isolated mask in independent levels
@@ -544,12 +551,11 @@ class Painter():
                         
                     # Update canvas_selected to not paint strokes outside mask boundaries  
                     canvas_selected, successful, isolated_canvas, isolated_canvas_process = utils.render_with_filter(canvas_selected, valid_strokes, valid_patch_indices, 
-                                                                                                                    valid_strokes_indices, brush_size, mask, self.renderer, level, 
+                                                                                                                    valid_strokes_indices, brush_size, mask, self.renderer, level, mode,
                                                                                                                     second_canvas=black_canvas_patches, 
                                                                                                                     third_canvas=black_canvas_process_patches)
-                                                                   
+
                     if self.args.texturize:
-                        canvas_selected_text = torch.index_select(prev_canvas_text, 0, torch.Tensor(mask_indices).int().to(device)) # [M, C, H, W] M << N
 
                         # These 2 lines are for when we are not returning process canvases       
                         black_canvas_patches_text = None
@@ -561,8 +567,9 @@ class Painter():
                             black_canvas_process_patches_text = torch.index_select(prev_canvas_process_text, 0, torch.Tensor(mask_indices).int().to(device))
                             
                         canvas_selected_text, successful_text, isolated_canvas_text, isolated_canvas_process_text = utils.render_with_filter(canvas_selected_text, valid_strokes, valid_patch_indices, valid_strokes_indices, brush_size, 
-                                                                                                    mask, self.renderer, level, writer=self.logger, texturize=True, painter=self, segm_name=name, 
-                                                                                                    second_canvas=black_canvas_patches_text, third_canvas=black_canvas_process_patches_text)
+                                                                                                    mask, self.renderer, level, mode, writer=self.logger, texturize=True, painter=self, segm_name=name, 
+                                                                                                    second_canvas=black_canvas_patches_text, 
+                                                                                                    third_canvas=black_canvas_process_patches_text)
                     
                     # Means there is at least one good stroke 
                     if successful:
@@ -587,6 +594,7 @@ class Painter():
                         
                         else:
                             canvas = canvas_selected
+                            canvas_text = canvas_selected_text
                             isolated_mask = isolated_canvas # = canvas
                             process_mask = isolated_canvas_process
                             
@@ -621,13 +629,15 @@ class Painter():
 
                     else:
                         canvas = canvas_selected
+                        canvas_text = canvas_selected_text
                 
                 canvases_segmentation.append(canvas)
 
                 # Compose all canvases patches into a bigger canavs 
                 if mode == 'natural':
+
                     self.general_canvas = utils.compose_general_canvas(self.args, canvas, mode, patches_limits_m, self.npatches_w, self.general_canvas, blendin=True)
-                    
+
                     if self.args.return_segmented_areas:
                         general_isolated_mask = utils.compose_general_canvas(self.args, isolated_mask, mode, patches_limits_m, self.npatches_w, self.black_canvas, blendin=True)
                         general_canvas_process = utils.compose_general_canvas(self.args, process_mask, mode, patches_limits_m, self.npatches_w, general_canvas_process, blendin=True)
@@ -664,8 +674,8 @@ class Painter():
                 # Texturize each mask 
                 if self.args.texturize:
                     
-                    if mode == 'natural':
-                        canvas_text, _, _  = utils.render(prev_canvas_text, strokes, budget, brush_size, self.renderer, self.num_params, level, texturize=True, painter=self, writer=self.logger, segm_name=name)
+                    if mode == 'natural': # Commented line below, canvas_text has already been set
+                        #canvas_text, _, _  = utils.render(prev_canvas_text, strokes, budget, brush_size, self.renderer, self.num_params, level, texturize=True, painter=self, writer=self.logger, segm_name=name)
                         self.general_canvas_texture = utils.compose_general_canvas(self.args, canvas_text, mode, patches_limits_m, self.npatches_w, self.general_canvas_texture, blendin=True)
                        
                         if self.args.return_segmented_areas:

@@ -161,7 +161,7 @@ def filter_strokes(target_patches, strokes, mask, indices, brush_size, renderer,
 
         # Set up patches 
         if mode == 'uniform':
-            target_patch = target_patches[indices[i]].unsqueeze(0) # [3, 128, 128]
+            target_patch = target_patches[indices[i]].unsqueeze(0) # [3, 128, 128] select target_patch that correspond to segmentation mask 
         else:
             target_patch = target_patches
         
@@ -262,7 +262,6 @@ def filter_strokes(target_patches, strokes, mask, indices, brush_size, renderer,
 
         valid_strokes_patch = torch.vstack(valid_strokes_patch).to(device) # [all_strokes, 13]
         valid_strokes.append(valid_strokes_patch)
-        #pdb.set_trace()
 
         if debug:
             print(f'non valid: {nonvalid}/{budget}')      

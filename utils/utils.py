@@ -279,7 +279,7 @@ def increase_boundary_thickness(binary_image, kernel_size=3, stride=1, padding=0
 
 
 # PATCHING UTILITIES -------------- 
-def merge_tensors(tensor_a, tensor_b, indices_a, indices_b):
+def merge_tensors_uniform(tensor_a, tensor_b, indices_a, indices_b):
     """
     Merges two tensors given a list of indices corresponding to tensor_a and tensor_b
 
@@ -305,6 +305,39 @@ def merge_tensors(tensor_a, tensor_b, indices_a, indices_b):
         merged_tensor[indices_a[i]] = tensor_a[i]
 
     for j in range(M-N):
+        #print(f'j: {j}, indices_b[j]: {indices_b[j]}')
+        merged_tensor[indices_b[j]] = tensor_b[indices_b[j]]
+
+    return merged_tensor 
+
+
+def merge_tensors(tensor_a, tensor_b, indices_a, indices_b):
+    """
+    Merges two tensors given a list of indices corresponding to tensor_a and tensor_b
+
+    :param tensor_a: batch tensor with smaller number of tensors
+    :param tensor_b: batch tensor containing all tensors 
+
+    :returns: merged tensor 
+    """
+
+    N, C, H, W = tensor_a.shape # N is a subset of M
+    M, _, _, _ = tensor_b.shape # M is all indices 
+
+    # Create new tensor with all M patches 
+    merged_tensor = torch.zeros(M, C, H, W).to(device)
+    
+    # Double-check N and M correspond to the lengths of indices_a and indices_b respectively
+    #assert N == len(indices_a)
+    #assert (M - N) == len(indices_b)
+    
+
+    for i in range(len(indices_a)): # 0, 1, 2....
+        # indices_a[i] = 37, 68, 3, 15, ...
+        #print(f'i: {i}, indices_a[i]: {indices_a[i]}')
+        merged_tensor[indices_a[i]] = tensor_a[i]
+
+    for j in range(M - len(indices_a)):
         #print(f'j: {j}, indices_b[j]: {indices_b[j]}')
         merged_tensor[indices_b[j]] = tensor_b[indices_b[j]]
 
@@ -469,8 +502,8 @@ def create_N_random_patches(image, N, mask=None, threshold=50, patch_size=128):
             cy = (start_h + end_h) // 2 # center y coordinate in patch 
 
             # 1 or 0 if patch falls in mask or not 
-            inmask = check_patch(mask, cx, cy, threshold=0.4) # 50% pixels should be in the mask 
-            #inmask = mask[:,:,cy,cx] # this is either 0 or 1 (inside mask or outside mask)
+            #inmask = check_patch(mask, cx, cy, threshold=0.4) # 50% pixels should be in the mask 
+            inmask = mask[:,:,cy,cx] # this is either 0 or 1 (inside mask or outside mask)
 
             # Do not add proposed patch if outside mask
             if inmask == 0:
@@ -584,7 +617,7 @@ def get_natural_patches(number_uniform_patches, source_img, general_canvas, logg
     print(f'\n Getting natural patches: {name}')
     
     # 1) Start with a slightly smaller number P, than the uniform approach 
-    num_patches = int(number_uniform_patches / 1.2)
+    num_patches = int(number_uniform_patches / 1.0)
     
     # Generate a list of valid patches T < P which if a mask is provided, they have to fall within the mask. 
     list_patches_locations = create_N_random_patches(source_img, num_patches, mask=mask) # list with lists of tuples 
@@ -612,7 +645,6 @@ def get_natural_patches(number_uniform_patches, source_img, general_canvas, logg
     mask_patches = None
     if mask != None:
         mask_patches = crop_image(patches_limits, mask, return_tensor=True).to(device)
-
 
     # Log boxes in canvas and source image  
     draw_bboxes(general_canvas, patches_limits, level, logger, name, canvas=True, path=path)
@@ -662,9 +694,10 @@ def any_column_true(A):
     return torch.any(A, dim=1)
 
 def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_size, mask, 
-                        renderer, level, writer=None, texturize=False, painter=None, segm_name='', second_canvas=None, third_canvas=None):
+                        renderer, level, mode, writer=None, texturize=False, painter=None, segm_name='', 
+                        second_canvas=None, third_canvas=None):
     
-    """Render stroke parameters into canvas, and optionally into a second canvas (for segmentation masks)
+    """Render stroke parameters into canvas, and optionally into a second and third canvases (for segmentation masks)
     
     :param canvas: A tensor of patches that correspond to a segmentation mask [n_patches, 3, 128, 128]
     :param strokes: [budget, n_patches, num_params]
@@ -691,17 +724,16 @@ def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_siz
 
     for i in range(npatches):
         
+        this_canvas = canvas[i].unsqueeze(0) # [1, 3, 128, 128]
+        if second_canvas != None:
+            this_second_canvas = second_canvas[i].unsqueeze(0)
+        if third_canvas != None:
+            this_third_canvas = third_canvas[i].unsqueeze(0)
+
         # Patch with at least one valid stroke 
         if valid_patches[i] != False:
             
             strokes_patch = strokes[i] # [budget, num_params]
-            
-            this_canvas = canvas[i].unsqueeze(0) # [1, 3, 128, 128]
-            if second_canvas != None:
-                this_second_canvas = second_canvas[i].unsqueeze(0)
-            if third_canvas != None:
-                this_third_canvas = third_canvas[i].unsqueeze(0)
-
             # canvas here is the same 
             for j in range(budget):
                 stroke_t = strokes_patch[j].unsqueeze(0) # [1, num_params]
@@ -724,8 +756,17 @@ def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_siz
                         if third_canvas != None:
                             this_third_canvas = forward_renderer(stroke_t, this_third_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0)) # [if passing mask, apply filterwise]
             
+            # At uniform mode, we need to add canvases only if they are valid 
+            if mode == 'uniform':
+                new_canvases.append(this_canvas)
+                if second_canvas != None:
+                    new_second_canvases.append(this_second_canvas)
+                if third_canvas != None:
+                    new_third_canvases.append(this_third_canvas)
+        
+        # At natural, we add canvases regardless whether they are valid 
+        if mode == 'natural':
             new_canvases.append(this_canvas)
-            
             if second_canvas != None:
                 new_second_canvases.append(this_second_canvas)
             if third_canvas != None:
@@ -733,7 +774,7 @@ def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_siz
     
     if new_canvases != []:
         new_canvases = torch.cat(new_canvases, dim=0)
-        assert new_canvases.shape[0] == len(patch_indices)
+        #assert new_canvases.shape[0] == len(patch_indices)
         successful = True
 
         if new_second_canvases != []:
@@ -965,7 +1006,6 @@ def compose_general_canvas(args, canvas, mode, patches_limits, npatches_w, gener
     if args.patch_strategy_detail == 'natural' and mode == 'natural':
         #self.general_canvas = RU.blend_diff(canvas, patches_limits, self.general_canvas, alpha=1.0)
         general_canvas = RU.blend_general_canvas_natural(canvas.detach(), patches_limits, general_canvas=general_canvas, blendin=blendin)
-
     else:
         #self.general_canvas = RU.blend_diff(canvas, patches_limits, self.general_canvas, alpha=1.0)
         general_canvas = RU.blend_general_canvas(canvas.detach(), general_canvas, args, patches_limits, npatches_w) # self.general_canvas [1, 3, H, W]
