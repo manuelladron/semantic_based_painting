@@ -58,6 +58,11 @@ def create_grid_strokes(budget, num_params, patch, device, std = 0.2):
     rad = torch.rand(budget, 2, requires_grad=True, device=device)
     transp = torch.ones(budget, 2, requires_grad=True, device=device)
     #rgb = torch.rand(budget, 3, requires_grad=True, device=device)
+
+    # Convert patch to a color palette 
+    palette = [(205,180,219),(255, 200, 221),(255, 175, 204),(189, 224, 254),(162, 210, 255)]
+    patch = color_palette_replace(patch, palette)
+
     rgb = (torch.ones(budget, 3, requires_grad=True, device=device) * (patch[:, (x*128).squeeze().long(), (y*128).squeeze().long()]).permute(1,0)).float()
 
     # Put them together 
@@ -103,6 +108,10 @@ def init_boundary_stroke_params(boundaries, patch, budget, device, std = 0.05):
     rad = torch.rand(budget, 2, requires_grad=True, device=device)
     transp = torch.ones(budget, 2, requires_grad=True, device=device)
     
+    # Convert patch to a color palette 
+    palette = [(205,180,219),(255, 200, 221),(255, 175, 204),(189, 224, 254),(162, 210, 255)]
+    patch = color_palette_replace(patch, palette)
+
     rgb = (torch.ones(budget, 3, requires_grad=True, device=device) * (patch[:, (x*128).squeeze().long(), (y*128).squeeze().long()]).permute(1,0)).float()
     #rgb = torch.rand(budget, 3, requires_grad=True, device=device)
     # Put them together 
@@ -164,3 +173,49 @@ def init_strokes_with_mask(N, budget, device, mask_or_edges, patches_limits_list
     strokes = torch.stack(strokes_l, dim=1).detach().requires_grad_() # [budget, npatches, 13]
     
     return strokes, indices 
+
+
+
+def color_palette_replace(image, palette):
+    # Convert the tensor to a numpy array
+    
+    np_img = (image.permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+
+    # Calculate the distance between each pixel in the image and each color in the palette
+    dist = np.sum((np_img[:, :, np.newaxis, :] - palette) ** 2, axis=3)
+
+    # Find the index of the closest color in the palette for each pixel in the image
+    idx = np.argmin(dist, axis=2)
+
+    # Replace the original RGB values in the image with the closest palette color
+    new_img = np.array(palette)[idx]
+
+    # Convert the numpy array back to a tensor
+    new_img = torch.from_numpy(new_img).permute(2, 0, 1).to(device)
+
+    # Return the new image tensor
+    return new_img/255.
+
+
+# def color_palette_replace(image, palette):
+#     # Convert the palette list to a PyTorch tensor
+#     palette_tensor = torch.tensor(palette, dtype=torch.float32)
+
+#     # Reshape the palette tensor to match the shape of the image tensor
+#     palette_tensor = palette_tensor.unsqueeze(0).unsqueeze(2) # [1, N, 1, 3]
+
+#     palette_tensor = palette_tensor.unsqueeze(2)
+
+#     print('palette tensor shape: ', palette_tensor.shape)
+#     print('image unsqueeze(2) tensor shape: ', image.unsqueeze(2).shape)
+#     # Calculate the distance between each pixel in the image and each color in the palette
+#     dist = torch.sum((image.unsqueeze(2) - palette_tensor) ** 2, dim=3)
+
+#     # Find the index of the closest color in the palette for each pixel in the image
+#     idx = torch.argmin(dist, dim=2)
+
+#     # Replace the original RGB values in the image with the closest palette color
+#     new_img = palette_tensor[idx]
+
+#     # Return the new image tensor
+#     return new_img

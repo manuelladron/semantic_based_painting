@@ -12,7 +12,9 @@ import torch.nn.functional as F
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-def optimization_loop(args, src_img, opt_steps, target_patches, prev_canvas, strokes, budget, brush_size, patches_limits, npatches_w, level, mode, general_canvas, optimizer, renderer, num_params, logger, perc_net, opt_style=False):
+def optimization_loop(args, src_img, opt_steps, target_patches, prev_canvas, strokes, budget, 
+                        brush_size, patches_limits, npatches_w, level, mode, general_canvas, 
+                        optimizer, renderer, num_params, logger, perc_net, opt_style=False, use_transp=True, color=None):
     """
     :param opt_steps: optimization steps, an integer
     :param prev_canvas: canvas that correspond to the previous layer, a tensor of shape [N,C,H,W]
@@ -31,7 +33,11 @@ def optimization_loop(args, src_img, opt_steps, target_patches, prev_canvas, str
         canvas = prev_canvas # [N, C, H, W]
         
         # Get painting (this is by patches)
-        canvas, canvases_seq, strokes_seq = utils.render(canvas, strokes, budget, brush_size, renderer, num_params)
+        if color != None:
+            strokes_with_color = torch.cat([strokes, color], dim=2)
+            canvas, canvases_seq, strokes_seq = utils.render(canvas, strokes_with_color, budget, brush_size, renderer, num_params, use_transp=use_transp)
+        else:
+            canvas, canvases_seq, strokes_seq = utils.render(canvas, strokes, budget, brush_size, renderer, num_params, use_transp=use_transp)
 
         # If using global loss, get a smaller size general canvas and source image to compute loss later
         if args.global_loss or opt_style:
@@ -107,7 +113,7 @@ def optimization_loop(args, src_img, opt_steps, target_patches, prev_canvas, str
 def optimization_loop_mask(args, src_img, opt_steps, target_patches, prev_canvas, 
                                 strokes, budget, brush_size, patches_limits, npatches_w, 
                                 level, mode, general_canvas, optimizer, renderer, num_params, 
-                                logger, perc_net, indices, global_loss=False, name='boundaries', mask=None):
+                                logger, perc_net, indices, global_loss=False, name='boundaries', mask=None, use_transp=True, color=None):
     
     """
     Args
@@ -144,18 +150,28 @@ def optimization_loop_mask(args, src_img, opt_steps, target_patches, prev_canvas
         # Reset canvas variable at each iteration: Get previous canvas as canvas 
         canvas = prev_canvas # [N, C, H, W] <- N = num_total_patches
         
+
         if mode == 'uniform':
             # Select canvases 
             canvas_selected = torch.index_select(canvas, 0, torch.Tensor(indices).int().to(device)) # [M, C, H, W] M << N
             
-            # Render strokes, which contain only patches that have masks or boundaries, so we need to select first only the canvases that have boundaries/masks 
-            canvas_selected, _, _ = utils.render(canvas_selected, strokes, budget, brush_size, renderer, num_params)
+            if color != None:
+                strokes_with_color = torch.cat([strokes, color], dim=2)
+                canvas_selected, _, _ = utils.render(canvas_selected, strokes_with_color, budget, brush_size, renderer, num_params, use_transp=use_transp)
+            else:
+                # Render strokes, which contain only patches that have masks or boundaries, so we need to select first only the canvases that have boundaries/masks 
+                canvas_selected, _, _ = utils.render(canvas_selected, strokes, budget, brush_size, renderer, num_params, use_transp=use_transp)
             
             # Merge all canvases (mask and no mask) - update canvas variable 
             canvas = utils.merge_tensors(canvas_selected, canvas, indices, indices_no_boundaries) # [N, C, H, W]
                 
         else:
-            canvas_selected, _, _  = utils.render(canvas, strokes, budget, brush_size, renderer, num_params) 
+
+            if color != None:
+                strokes_with_color = torch.cat([strokes, color], dim=2)
+                canvas_selected, _, _ = utils.render(canvas, strokes_with_color, budget, brush_size, renderer, num_params, use_transp=use_transp)
+            else:
+                canvas_selected, _, _  = utils.render(canvas, strokes, budget, brush_size, renderer, num_params, use_transp=use_transp) 
             canvas = canvas_selected
         
         # If using global loss, get a smaller size general canvas and source image to compute loss later

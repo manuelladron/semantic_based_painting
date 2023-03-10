@@ -207,7 +207,7 @@ def filter_strokes(target_patches, strokes, mask, indices, brush_size, renderer,
                 print(f'Coords x2, y2 in mask: ', mask_patch[x2, y2].item())
                 
             # 1) Check for pixelwise overlap with mask  -> the higher the threshold the more strict is the algorithm to select valid strokes 
-            valid_stroke = check_mask_overlap(mask_patch, alpha.squeeze(), threshold=0.95) # if where mask==1 and stroke==1 overlap for more than 80% then it's valid 
+            valid_stroke = check_mask_overlap(mask_patch, alpha.squeeze(), threshold=0.98) # if where mask==1 and stroke==1 overlap for more than 80% then it's valid 
             
             # 2) Check for color distance: even if it's a valid stroke, if the color is off, discard it 
             # stroke = strokes_patch[j].clip(0, 1) 

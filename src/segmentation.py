@@ -75,6 +75,7 @@ def segment_image(image_path, labels_list, src_img, is_path=True, is_url=False):
 
     category_ids = {}
     for i in range(len(unique_seg_ids)):
+        assert len(segment_info) == len(unique_seg_ids), "error segmenting this mask"
         category_id = segment_info[i]['category_id']
         category_ids[i] = category_id
 

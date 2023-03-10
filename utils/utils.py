@@ -23,6 +23,7 @@ def save_img(image, dirpath, img_name):
     save_image(image, img_name_complete)
 
 
+
 def remove_elements_by_indexes(lst, idxs):
     # Create a new list that contains elements that are not at the specified indexes
     new_lst = [lst[i] for i in range(len(lst)) if i not in idxs]
@@ -169,7 +170,7 @@ def resize_array(array, target_size):
     resized_array = cv2.resize(array, (height, width), interpolation=cv2.INTER_NEAREST)
     return resized_array
 
-def process_img(args, img_path, writer, resize_value=128, min_width=400):
+def process_img(args, img_path, writer, resize_value=128, min_width=1500):
     """
     Receives image path, opens and resizes it and returns tensor 
     """
@@ -185,16 +186,29 @@ def process_img(args, img_path, writer, resize_value=128, min_width=400):
     
     else: 
         # Decrease size if it's too big 
-        if src_img.shape[0] or src_img.shape[1] > 1200:
+        if src_img.shape[0] > min_width or src_img.shape[1] > min_width:
+            
+            if src_img.shape[0] > min_width or src_img.shape[1] > 4000:
+                args.aspect_ratio_downsample = 4
+            
             new_h = src_img.shape[0] // args.aspect_ratio_downsample
             new_w = src_img.shape[1] // args.aspect_ratio_downsample
         
+            if args.upsample and (new_h < min_width or new_w < min_width): # Adjust it to be at least over 1000 pixels so the painting is not too small 
+                if src_img.shape[0] >= src_img.shape[1]:
+                    src_img = image_resize(src_img, height=min_width)
+                else:
+                    src_img = image_resize(src_img, width=min_width)
+
+                new_h = src_img.shape[0]
+                new_w = src_img.shape[1]
+
         elif args.upsample and (new_h < min_width or new_w < min_width): # Adjust it to be at least over 1000 pixels so the painting is not too small 
-            src_img = image_resize(src_img, width=min_width)
-            
-            if args.salient_mask != '':
-                mask = image_resize(args.salient_mask, width=min_width)
-            
+            if src_img.shape[0] >= src_img.shape[1]:
+                src_img = image_resize(src_img, height=min_width)
+            else:
+                src_img = image_resize(src_img, width=min_width)
+
             new_h = src_img.shape[0]
             new_w = src_img.shape[1]
         
@@ -248,6 +262,13 @@ def process_img(args, img_path, writer, resize_value=128, min_width=400):
         writer.add_image('segm_original', img_tensor=segm_mask_color_with_boundaries, global_step=0)
         writer.add_image('segm_original_overlay', img_tensor=segm_mask_overlay, global_step=0)
 
+        # Save 
+        basename = os.path.basename(args.image_path).split(".")[0]
+        img_name = f'{basename}_segm_mask_overlay_original.jpg'
+        save_img(segm_mask_overlay.squeeze()/255., args.save_dir, img_name)
+        img_name = f'{basename}_segm_mask_original.jpg'
+        save_img(segm_mask_color_with_boundaries.squeeze()/255., args.save_dir, img_name)
+
         segm_mask_color_with_boundaries = segm_mask_color_with_boundaries.to(device)
 
     if args.use_edges:
@@ -262,7 +283,7 @@ def process_img(args, img_path, writer, resize_value=128, min_width=400):
     img = torch.from_numpy(src_img.transpose(2,0,1)).unsqueeze(0) # [1, C, H, W]
     
     print(f'Adjusted input image -> H={img.shape[2]}, W={img.shape[3]}')
-    return img, mask, npatches_h, npatches_w, segm_ids, boundaries, segm_cat_ids, seg_labels, binary_masks_list, segm_mask_color_with_boundaries
+    return img, mask, npatches_h, npatches_w, segm_ids, boundaries, segm_cat_ids, seg_labels, binary_masks_list, args.aspect_ratio_downsample
 
 
 def increase_boundary_thickness(binary_image, kernel_size=3, stride=1, padding=0):
@@ -695,7 +716,7 @@ def any_column_true(A):
 
 def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_size, mask, 
                         renderer, level, mode, writer=None, texturize=False, painter=None, segm_name='', 
-                        second_canvas=None, third_canvas=None):
+                        second_canvas=None, third_canvas=None, use_transp=True):
     
     """Render stroke parameters into canvas, and optionally into a second and third canvases (for segmentation masks)
     
@@ -743,18 +764,18 @@ def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_siz
                     assert torch.all(stroke_t != -1), "Wrong stroke, check the filter algorithm" # Double check it's not a bad stroke 
 
                     if texturize:
-                        this_canvas, _ ,_ = RU.texturize(stroke_t, this_canvas, brush_size, j, num_params, writer, level, painter=painter, segm_name=segm_name)
+                        this_canvas, _ ,_ = RU.texturize(stroke_t, this_canvas, brush_size, j, num_params, writer, level, painter=painter, segm_name=segm_name, use_transp=use_transp)
                         if second_canvas != None:
-                            this_second_canvas, _ ,_ = RU.texturize(stroke_t, this_second_canvas, brush_size, j, num_params, writer, level, painter=painter, segm_name=segm_name)
+                            this_second_canvas, _ ,_ = RU.texturize(stroke_t, this_second_canvas, brush_size, j, num_params, writer, level, painter=painter, segm_name=segm_name, use_transp=use_transp)
                         if third_canvas != None:
-                            this_third_canvas, _ ,_ = RU.texturize(stroke_t, this_third_canvas, brush_size, j, num_params, writer, level, painter=painter, segm_name=segm_name)
+                            this_third_canvas, _ ,_ = RU.texturize(stroke_t, this_third_canvas, brush_size, j, num_params, writer, level, painter=painter, segm_name=segm_name, use_transp=use_transp)
                     
                     else:
-                        this_canvas = forward_renderer(stroke_t, this_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0)) # [if passing mask, apply filterwise]
+                        this_canvas = forward_renderer(stroke_t, this_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0), use_transp=use_transp) # [if passing mask, apply filterwise]
                         if second_canvas != None:
-                            this_second_canvas = forward_renderer(stroke_t, this_second_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0)) # [if passing mask, apply filterwise]
+                            this_second_canvas = forward_renderer(stroke_t, this_second_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0), use_transp=use_transp) # [if passing mask, apply filterwise]
                         if third_canvas != None:
-                            this_third_canvas = forward_renderer(stroke_t, this_third_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0)) # [if passing mask, apply filterwise]
+                            this_third_canvas = forward_renderer(stroke_t, this_third_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0), use_transp=use_transp) # [if passing mask, apply filterwise]
             
             # At uniform mode, we need to add canvases only if they are valid 
             if mode == 'uniform':
@@ -793,7 +814,7 @@ def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_siz
     return new_canvases, successful, new_second_canvases, new_third_canvases
 
 
-def render(canvas, strokes, budget, brush_size, renderer, num_params=13, level=None, texturize=False, painter=None, writer=None, segm_name=''):
+def render(canvas, strokes, budget, brush_size, renderer, num_params=13, level=None, texturize=False, painter=None, writer=None, segm_name='', use_transp=True):
     """Render stroke parameters into canvas
     :param canvas: [n_patches, 3, 128, 128]
     :param strokes: [budget, n_patches, num_params]
@@ -806,10 +827,10 @@ def render(canvas, strokes, budget, brush_size, renderer, num_params=13, level=N
         stroke_t = strokes[t]#.unsqueeze(0) # [num_patches, 13]
 
         if texturize:
-            canvas, _ ,_ = RU.texturize(stroke_t, canvas, brush_size, t, num_params, writer, level, painter=painter, segm_name=segm_name)
+            canvas, _ ,_ = RU.texturize(stroke_t, canvas, brush_size, t, num_params, writer, level, painter=painter, segm_name=segm_name, use_transp=use_transp)
         
         else:
-            canvas = forward_renderer(stroke_t, canvas, brush_size, num_params, renderer, device)
+            canvas = forward_renderer(stroke_t, canvas, brush_size, num_params, renderer, device, use_transp=use_transp)
 
 
     return canvas, None, None
@@ -817,7 +838,7 @@ def render(canvas, strokes, budget, brush_size, renderer, num_params=13, level=N
 
 
 
-def forward_renderer(stroke, canvas, brush_size, num_params, renderer, device, mask=None, return_alpha=False):
+def forward_renderer(stroke, canvas, brush_size, num_params, renderer, device, mask=None, return_alpha=False, use_transp=True):
     """
     Renderer network takes in all stroke parameters except for RGB. Renderer outputs an alpha stroke of 128x128 with a white background. 
     Stroke black, background white 
@@ -833,7 +854,9 @@ def forward_renderer(stroke, canvas, brush_size, num_params, renderer, device, m
     original_canvas = canvas.clone()
 
     # Make it opaque and clip width -> Transparency is being controlled by 
-    #stroke = remove_transparency(stroke, device, num_params)
+    if use_transp == False:
+        stroke = remove_transparency(stroke, num_params)
+    
     stroke = clip_width(stroke, num_params, max=brush_size, device=device)
 
     # Get stroke alpha 

@@ -11,13 +11,14 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 
-def _forward_pass_l2p_alpha(action, num_params, renderer):
+def _forward_pass_l2p_alpha(action, num_params, renderer, use_transp):
     i_til_rgb = 10
-    #action = utils.remove_transparency(action, num_params)
+    if use_transp == False:
+        action = utils.remove_transparency(action, num_params)
     stroke = 1 - renderer(action[:, :i_til_rgb]).unsqueeze(1) # [1, 128, 128] -> [1, 1, 128, 128]
     return stroke.repeat(1,3,1,1) # returns alpha with 3 channels
 
-def texturize(strokes, canvases, brush_size, t, num_params, writer, level, onehot=None, mask_patches=None, painter=None, segm_name=''):
+def texturize(strokes, canvases, brush_size, t, num_params, writer, level, onehot=None, mask_patches=None, painter=None, segm_name='', use_transp=True):
     """
     Processes textures stroke by stroke
 
@@ -32,7 +33,8 @@ def texturize(strokes, canvases, brush_size, t, num_params, writer, level, oneho
     """
     valid_strokes = 0
     invalid_strokes = 0
-    #strokes = utils.remove_transparency(strokes, num_params=num_params)
+    if use_transp == False:
+        strokes = utils.remove_transparency(strokes, num_params=num_params)
     strokes = utils.clip_width(strokes, num_params, max=brush_size)
     
     # iterate over patches and apply texture one by one
@@ -466,7 +468,7 @@ def add_linear_texture(painter, stroke_param, canvas_size, texture_path, center_
     #     plt.show()
 
     # Mask out the shape and add color
-    alpha = _forward_pass_l2p_alpha(stroke_param, painter.num_params, painter.renderer)  # [1,3,128,128] [0-1] range 
+    alpha = _forward_pass_l2p_alpha(stroke_param, painter.num_params, painter.renderer, painter.args.use_transparency)  # [1,3,128,128] [0-1] range 
 
     if visualize:
         alpha_np = (alpha.squeeze() * 255).permute(1, 2, 0).detach().cpu().numpy().astype(np.uint8)  # [H,W,3]
@@ -474,7 +476,7 @@ def add_linear_texture(painter, stroke_param, canvas_size, texture_path, center_
         plt.show()
 
     # Reshapes texture into alpha shape : basically, crops the bitmap with the alpha shape of the stroke 
-    transl[alpha < 0.4] = 0  # [0-1] range
+    transl[alpha <= 0.5] = 0  # [0-1] range
 
     # text_alpha_np = (transl*255).squeeze().permute(1, 2, 0).detach().cpu().numpy().astype(np.uint8)  # [H,W,3]
     text_alpha_np = (transl).squeeze().permute(1, 2, 0).detach().cpu().numpy()  # [H,W,3]
