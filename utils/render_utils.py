@@ -11,8 +11,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 
-def _forward_pass_l2p_alpha(action, num_params, renderer, use_transp):
-    i_til_rgb = 10
+def _forward_pass_l2p_alpha(action, num_params, renderer, use_transp, i_til_rgb=10):
     if use_transp == False:
         action = utils.remove_transparency(action, num_params)
     stroke = 1 - renderer(action[:, :i_til_rgb]).unsqueeze(1) # [1, 128, 128] -> [1, 1, 128, 128]
@@ -468,7 +467,8 @@ def add_linear_texture(painter, stroke_param, canvas_size, texture_path, center_
     #     plt.show()
 
     # Mask out the shape and add color
-    alpha = _forward_pass_l2p_alpha(stroke_param, painter.num_params, painter.renderer, painter.args.use_transparency)  # [1,3,128,128] [0-1] range 
+    i_til_rgb = 10 if painter.num_params == 13 else 8
+    alpha = _forward_pass_l2p_alpha(stroke_param, painter.num_params, painter.renderer, painter.args.use_transparency, i_til_rgb)  # [1,3,128,128] [0-1] range 
 
     if visualize:
         alpha_np = (alpha.squeeze() * 255).permute(1, 2, 0).detach().cpu().numpy().astype(np.uint8)  # [H,W,3]
@@ -483,7 +483,12 @@ def add_linear_texture(painter, stroke_param, canvas_size, texture_path, center_
     text_alpha = text_alpha_np.copy()
 
     # Set color 
-    R, G, B = stroke_param[0, 10], stroke_param[0, 11], stroke_param[0, 12]
+    if painter.num_params == 13:
+        R, G, B = stroke_param[0, 10], stroke_param[0, 11], stroke_param[0, 12]
+    
+    else:
+        R, G, B = stroke_param[0, 8], stroke_param[0, 9], stroke_param[0, 10]
+    
     text_alpha_np[:, :, 0] = text_alpha_np[:, :, 0] * R.item()  # [3, 128, 128]
     text_alpha_np[:, :, 1] = text_alpha_np[:, :, 1] * G.item()  # text alpha is in [0-255], multiplied by 0.4 gives us
     text_alpha_np[:, :, 2] = text_alpha_np[:, :, 2] * B.item()

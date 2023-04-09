@@ -139,6 +139,8 @@ def filter_strokes(target_patches, strokes, mask, indices, brush_size, renderer,
     assert strokes.shape[1] == len(indices) == mask.shape[0]
     strokes = strokes.permute(1, 0, 2) # [budget, M, 13] --> [M, budget, 13]
 
+    num_params = strokes.shape[2]
+
     debug_strokes = [] # we are returning this 
     if debug:
         strokes_debug = strokes.clone()
@@ -152,7 +154,7 @@ def filter_strokes(target_patches, strokes, mask, indices, brush_size, renderer,
     valid_strokes = []
     
     # Dumb tensor use for padding 
-    dumb_tensor = (torch.ones(13) * -1).to(device)  # [13]
+    dumb_tensor = (torch.ones(num_params) * -1).to(device)  # [13]
     
     total_non_valid = 0
     total_strokes = 0
@@ -185,11 +187,15 @@ def filter_strokes(target_patches, strokes, mask, indices, brush_size, renderer,
         # Iterate over all stroke parameters 
         for j in range(budget):
             total_strokes += 1
-            canvas_debug, alpha = utils.forward_renderer(strokes_patch[j].unsqueeze(0), mask_patch.unsqueeze(0).unsqueeze(1), brush_size, 13, renderer, device, return_alpha=True) # [1, 3, 128, 128]
+            canvas_debug, alpha = utils.forward_renderer(strokes_patch[j].unsqueeze(0), mask_patch.unsqueeze(0).unsqueeze(1), brush_size, num_params, renderer, device, return_alpha=True) # [1, 3, 128, 128]
             
             stroke = (strokes_patch[j].clip(0, 1) * 127).long() # indiviudal stroke 
-            x0, y0 ,x, y, x2, y2, r0, r2, t0, t2, r, g, b = stroke # x == row, y == col (x is the index in the vertical axis, y is the index in the horizontal axis)
- 
+
+            if num_params == 13:
+                x0, y0 ,x, y, x2, y2, r0, r2, t0, t2, r, g, b = stroke # x == row, y == col (x is the index in the vertical axis, y is the index in the horizontal axis)
+            else:
+                x0, y0, x2, y2, r0, r2, t0, t2, r, g, b = stroke
+            
             # Log for debug
             if debug:
                 canvas_debug = draw_red_square(canvas_debug, y0.item(), x0.item(), R=5, color='red')

@@ -6,7 +6,7 @@ import torch
 import cv2 
 from PIL import Image
 from skimage.segmentation import find_boundaries
-from models.renderers import FCN
+from models.renderers import FCN, FCN_2outputs
 from torch.utils.tensorboard import SummaryWriter
 import torch 
 import torch.nn.functional as F
@@ -76,13 +76,11 @@ def normalize_img(img):
     
 def init_logger(args):
 
-    dirname = args.save_dir
-    subdir = 'logs'
-    name = args.exp_name
+    # name = args.exp_name
+    # fullpath = os.path.join(args.log_dir, name)
 
-    fullpath = os.path.join(dirname, subdir, name)
-    logger = SummaryWriter(fullpath)
-    print(f'logger created in {fullpath}')
+    logger = SummaryWriter(args.log_dir)
+    print(f'logger created in {args.log_dir}')
     return logger 
 
 def resize_based_on_patches(src_img, args, h, w, mask=None):
@@ -170,7 +168,7 @@ def resize_array(array, target_size):
     resized_array = cv2.resize(array, (height, width), interpolation=cv2.INTER_NEAREST)
     return resized_array
 
-def process_img(args, img_path, writer, resize_value=128, min_width=1500):
+def process_img(args, img_path, writer, style_img_path=None, resize_value=128, min_width=1500):
     """
     Receives image path, opens and resizes it and returns tensor 
     """
@@ -179,6 +177,12 @@ def process_img(args, img_path, writer, resize_value=128, min_width=1500):
     src_img = cv2.imread(img_path, cv2.IMREAD_COLOR)[:,:,::-1] # from BGR to RGB uint8 [H,W,3]
     print(f'Original image size H={src_img.shape[0]} x W={src_img.shape[1]}')
     
+    style_img = None # to return 
+    # If style image 
+    if style_img_path != None:
+        style_img = cv2.imread(style_img_path, cv2.IMREAD_COLOR)[:,:,::-1] # from BGR to RGB uint8 [H,W,3]
+
+
     # If passing a resizing value 
     if resize_value != None:
         src_img = cv2.resize(src_img, (resize_value, resize_value)) # [0-255]
@@ -226,9 +230,15 @@ def process_img(args, img_path, writer, resize_value=128, min_width=1500):
         #     print(f'downsampled H: {self.original_H}, downsampled W : {self.original_W}')
 
     npatches_h, npatches_w, mask = 0, 0, None
+
     if args.paint_by_patches:
         src_img, npatches_h, npatches_w, mask = resize_based_on_patches(src_img, args, new_h, new_w, mask=None) # src img is [H, W, 3]
     
+    if style_img_path != None:
+        target_height, target_width, _ = src_img.shape
+        style_img = cv2.resize(style_img, (target_width, target_height))
+        assert style_img.shape == src_img.shape, "style image not the same shape as source image"
+   
     # Calculate segmentation map 
     segm_ids, boundaries, segm_cat_ids, seg_labels, binary_masks_list = 0, 0, 0, 0, []
     segm_mask_color_with_boundaries = 0
@@ -281,9 +291,13 @@ def process_img(args, img_path, writer, resize_value=128, min_width=1500):
     # Normalize it and conver to torch tensor 
     src_img = normalize_img(src_img)
     img = torch.from_numpy(src_img.transpose(2,0,1)).unsqueeze(0) # [1, C, H, W]
+
+    if style_img_path != None:
+        style_img = normalize_img(style_img)
+        style_img = torch.from_numpy(style_img.transpose(2,0,1)).unsqueeze(0) # [1, C, H, W] 
     
     print(f'Adjusted input image -> H={img.shape[2]}, W={img.shape[3]}')
-    return img, mask, npatches_h, npatches_w, segm_ids, boundaries, segm_cat_ids, seg_labels, binary_masks_list, args.aspect_ratio_downsample
+    return img, mask, npatches_h, npatches_w, segm_ids, boundaries, segm_cat_ids, seg_labels, binary_masks_list, args.aspect_ratio_downsample, style_img
 
 
 def increase_boundary_thickness(binary_image, kernel_size=3, stride=1, padding=0):
@@ -352,7 +366,6 @@ def merge_tensors(tensor_a, tensor_b, indices_a, indices_b):
     #assert N == len(indices_a)
     #assert (M - N) == len(indices_b)
     
-
     for i in range(len(indices_a)): # 0, 1, 2....
         # indices_a[i] = 37, 68, 3, 15, ...
         #print(f'i: {i}, indices_a[i]: {indices_a[i]}')
@@ -700,8 +713,13 @@ def clip_width(stroke, num_params, max, device=device, min=0.01):
 # RENDERER UTILITIES -------------- 
 
 def setup_renderer(args, device):
-    rend_path = args.renderer_ckpt_path
-    renderer = FCN().to(device)
+    if args.brush_type == 'curved':
+        rend_path = args.renderer_ckpt_path
+        renderer = FCN().to(device)
+    else:
+        rend_path = args.renderer_ckpt_path_straight
+        renderer = FCN_2outputs(8).to(device)
+   
     # Load renderer 
     renderer.load_state_dict(torch.load(rend_path, map_location=device))
     renderer.eval()
@@ -716,7 +734,7 @@ def any_column_true(A):
 
 def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_size, mask, 
                         renderer, level, mode, writer=None, texturize=False, painter=None, segm_name='', 
-                        second_canvas=None, third_canvas=None, use_transp=True):
+                        second_canvas=None, third_canvas=None, use_transp=True, patches_limits=None):
     
     """Render stroke parameters into canvas, and optionally into a second and third canvases (for segmentation masks)
     
@@ -724,7 +742,8 @@ def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_siz
     :param strokes: [budget, n_patches, num_params]
     :param patch_indices: len with integers of valid patches 
     :param stroke_indices: bool [budget, n_patches]
-    
+    :param patches_limits: list with location of stroke[(xmin,ymin), (xmax,ymax)]
+
     :param mask: [num_patches, 1, 128, 128]
     """
     strokes = strokes.permute(1,0,2) # [npatches, budget, num_params]
@@ -743,7 +762,12 @@ def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_siz
     new_second_canvases = []
     new_third_canvases = []
 
+    i_til_rgb = 10 if num_params == 13 else 8
+
+    all_canavses_4_gif = dict()
+
     for i in range(npatches):
+        all_canavses_4_gif[str(i)] = []
         
         this_canvas = canvas[i].unsqueeze(0) # [1, 3, 128, 128]
         if second_canvas != None:
@@ -776,6 +800,8 @@ def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_siz
                             this_second_canvas = forward_renderer(stroke_t, this_second_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0), use_transp=use_transp) # [if passing mask, apply filterwise]
                         if third_canvas != None:
                             this_third_canvas = forward_renderer(stroke_t, this_third_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0), use_transp=use_transp) # [if passing mask, apply filterwise]
+
+                    all_canavses_4_gif[str(i)].append(this_canvas)
             
             # At uniform mode, we need to add canvases only if they are valid 
             if mode == 'uniform':
@@ -811,7 +837,7 @@ def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_siz
         if third_canvas != None:
             new_third_canvases = third_canvas
     
-    return new_canvases, successful, new_second_canvases, new_third_canvases
+    return new_canvases, successful, new_second_canvases, new_third_canvases, all_canavses_4_gif
 
 
 def render(canvas, strokes, budget, brush_size, renderer, num_params=13, level=None, texturize=False, painter=None, writer=None, segm_name='', use_transp=True):
@@ -830,12 +856,11 @@ def render(canvas, strokes, budget, brush_size, renderer, num_params=13, level=N
             canvas, _ ,_ = RU.texturize(stroke_t, canvas, brush_size, t, num_params, writer, level, painter=painter, segm_name=segm_name, use_transp=use_transp)
         
         else:
+            i_til_rgb = 10 if num_params == 13 else 8
             canvas = forward_renderer(stroke_t, canvas, brush_size, num_params, renderer, device, use_transp=use_transp)
 
 
     return canvas, None, None
-
-
 
 
 def forward_renderer(stroke, canvas, brush_size, num_params, renderer, device, mask=None, return_alpha=False, use_transp=True):
@@ -848,23 +873,26 @@ def forward_renderer(stroke, canvas, brush_size, num_params, renderer, device, m
     :param mask: Apply pixelwise gate for filtering strokes  
     
     """
+    i_til_rgb = 10 if num_params == 13 else 8
     width = canvas.shape[2]
-    i_til_rgb = 10
     
     original_canvas = canvas.clone()
 
     # Make it opaque and clip width -> Transparency is being controlled by 
     if use_transp == False:
         stroke = remove_transparency(stroke, num_params)
+        #print('stroke_transparency: ', stroke[:, 8:10])
     
     stroke = clip_width(stroke, num_params, max=brush_size, device=device)
 
+    #print('stroke_transparency: ', stroke[:, 8:10])
     # Get stroke alpha 
     alpha = (1 - renderer(stroke[:, :i_til_rgb])).unsqueeze(1) # white stroke, black_background [n_patches, 128, 128] -> [n_patches, 1, 128, 128]
-    
+
     # Multiply alpha by RGB params
     color_stroke = alpha * stroke[: , -3:].view(-1, 3, 1, 1) # [N, 3, 128, 128]
 
+    #pdb.set_trace()
     # Reshape alpha 
     alpha = alpha.view(-1, 1, width, width) # [N, 1, 128, 128]
     
@@ -1022,13 +1050,14 @@ def blend_all_canvases(canvases, patches_limits, general_canvas, source_img, log
 
 
 def compose_general_canvas(args, canvas, mode, patches_limits, npatches_w, general_canvas, blendin=True):
-    """Takes all canvas patches and stiches them together 
+    """Takes all canvas patches and stitchs them together 
     :param canvas: a tensor of shape [npatches, 3, 128, 128]
     """
     
     if args.patch_strategy_detail == 'natural' and mode == 'natural':
         #self.general_canvas = RU.blend_diff(canvas, patches_limits, self.general_canvas, alpha=1.0)
         general_canvas = RU.blend_general_canvas_natural(canvas.detach(), patches_limits, general_canvas=general_canvas, blendin=blendin)
+    
     else:
         #self.general_canvas = RU.blend_diff(canvas, patches_limits, self.general_canvas, alpha=1.0)
         general_canvas = RU.blend_general_canvas(canvas.detach(), general_canvas, args, patches_limits, npatches_w) # self.general_canvas [1, 3, H, W]
