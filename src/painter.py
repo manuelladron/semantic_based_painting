@@ -201,6 +201,7 @@ class Painter():
 
 
     def get_reference_patches(self, mode, level, number_natural_patches):
+        
         """Crops patches from source image according to the given mode: 
         :param mode: string which is either "uniform" or "natural" 
             - If uniform: patches are already cropped as a grid in get_img_and_canvas function, just return them along the already patches limits 
@@ -216,7 +217,7 @@ class Painter():
             if self.args.use_segmentation_contours:
                 boundaries_patches = torch.cat(self.segm_boundaries_patches, dim=0).to(device)
 
-            # Iterate over segmentation binary masks and reutrn a list of patches of length number of segmentation masks 
+            ## Iterate over segmentation binary masks and reutrn a list of patches of length number of segmentation masks 
             if self.args.use_segmentation_mask: 
                 mask_patches_list = []
                 for i in range(len(self.list_binary_mask_patches)): # this is a list of length number of segemntation masks. Each element in list is another list with a bunch of patches that build up the mask 
@@ -236,6 +237,7 @@ class Painter():
             # 1) Using segmentation masks 
             target_patches, patches_limits, indices, values, mask_patches, names = [],[],[],[],[],[]
             unvalid_indexes = []
+            
             if self.args.use_segmentation_mask:
                 
                 for i in range(len(self.list_binary_masks)): # this is a list of length number of segemntation masks. Each element in list is another list with a bunch of patches that build up the mask 
@@ -307,7 +309,7 @@ class Painter():
 
         :param canvas: previous painted canvas, if not, it will be start a blank canvas. Either None or a tensor of shape [n_patches, 3, 128, 128]
         :param canvas_text: same as canvas but for textured strokes
-        :param opt_steps: optimizatino steps, integer
+        :param opt_steps: optimization steps, integer
         :param budget: number of strokes to initialize on this layer 
         :param brush_size: thickness for brush strokes of this layer, a float
         :param level: info about this painting layer, an integer
@@ -422,9 +424,11 @@ class Painter():
             process_canvases = []
             process_canvases_text = []
             
+            animation_info = dict()
             # Iterate over segmentation masks, independently from each other 
             for i in range(len(self.list_binary_mask_patches)):
                 
+                # Create canvases for segmentation masks 
                 if self.args.return_segmented_areas:
                     # Black canvas for segmentation mask 
                     black_canvas = torch.zeros(self.npatches_total, 3, 128, 128).to(device)  # [npatches, 3, H, W]
@@ -555,16 +559,18 @@ class Painter():
                         # For isolated mask in independent levels
                         black_canvas_patches = torch.zeros_like(canvas_selected).to(device) # prev_canvas before here 
                         black_canvas_process_patches = torch.index_select(prev_canvas_process, 0, torch.Tensor(mask_indices).int().to(device))
-                        
+
+
                     # RENDER: Update canvas_selected to not paint strokes outside mask boundaries  
-                    canvas_selected, successful, isolated_canvas, isolated_canvas_process, all_canvases_4_gif = utils.render_with_filter(canvas_selected, valid_strokes, valid_patch_indices, 
+                    canvas_selected, successful, isolated_canvas, isolated_canvas_process, all_strokes_4_gif, num_valid_strokes = utils.render_with_filter(canvas_selected, valid_strokes, valid_patch_indices, 
                                                                                                                     valid_strokes_indices, brush_size, mask, self.renderer, level, mode,
                                                                                                                     second_canvas=black_canvas_patches, 
                                                                                                                     third_canvas=black_canvas_process_patches, 
-                                                                                                                    use_transp=self.args.use_transparency)
+                                                                                                                    use_transp=self.args.use_transparency, 
+                                                                                                                    patches_limits=patches_limits_m, 
+                                                                                                                    general_canvas = self.general_canvas)
 
                     if self.args.texturize:
-
                         # These 2 lines are for when we are not returning process canvases       
                         black_canvas_patches_text = None
                         black_canvas_process_patches_text = None
@@ -575,11 +581,36 @@ class Painter():
                             black_canvas_process_patches_text = torch.index_select(prev_canvas_process_text, 0, torch.Tensor(mask_indices).int().to(device))
                             
                         #canvas_selected_text = canvas_selected # paint on top of the canvas without texture 
-                        canvas_selected_text, _ , isolated_canvas_text, isolated_canvas_process_text, all_canvases_4_gif = utils.render_with_filter(canvas_selected_text, valid_strokes, valid_patch_indices, valid_strokes_indices, brush_size, 
+                        canvas_selected_text, _ , isolated_canvas_text, isolated_canvas_process_text, all_strokes_4_gif, num_valid_strokes = utils.render_with_filter(canvas_selected_text, valid_strokes, valid_patch_indices, valid_strokes_indices, brush_size, 
                                                                                                     mask, self.renderer, level, mode, writer=self.logger, texturize=True, painter=self, segm_name=name, 
                                                                                                     second_canvas=black_canvas_patches_text, 
                                                                                                     third_canvas=black_canvas_process_patches_text, 
-                                                                                                    use_transp=self.args.use_transparency)
+                                                                                                    use_transp=self.args.use_transparency,
+                                                                                                    patches_limits=patches_limits_m, 
+                                                                                                    general_canvas = self.general_canvas)
+                    
+                    this_mask = {'canvas': general_canvas_process.clone(), 
+                                'strokes': all_strokes_4_gif, 
+                                'num_strokes': num_valid_strokes}
+                    
+                    animation_info[name] = this_mask
+                    
+                    """
+                    # Creating gif here
+                    print('Creating animation...')
+                    gif_dir = os.path.join(self.args.save_dir, 'gif', name)
+                    os.makedirs(gif_dir, exist_ok=True)
+                    
+                    #canvas_gif = torch.zeros_like(general_canvas_process).to(device)
+                    canvas_gif = general_canvas_process.clone()
+                    utils.process_strokes_and_save(all_canvases_4_gif, canvas_gif, gif_dir, start_frame=0)
+
+                    # Create gif 
+                    output_file = os.path.join(gif_dir, f'{name}.gif')
+                    utils.create_gif(gif_dir, output_file, fps=30)
+
+                    print('....animation finished')
+                    """
                     
                     # Means there is at least one good stroke 
                     if successful:
@@ -761,6 +792,7 @@ class Painter():
 
         # Uniform / natural painting without using masks 
         else:
+            animation_info = None
             std_dev = 0.05 if level >= 2 else 0.1 if level >= 1 else 0.2 # Decrease thickness in later levels.
             #std_dev = 0.1 if level > 1 else 0.2 
             
@@ -930,7 +962,7 @@ class Painter():
             if not isinstance(self.segm_mask_color, int):
                 utils.save_img(segm_mask_overlay_canvas/255, self.args.save_dir, img_name)
 
-        return canvas, strokes, canvas_text, canvas_style, process_canvases, process_canvases_text, canvas_style_text
+        return canvas, strokes, canvas_text, canvas_style, process_canvases, process_canvases_text, canvas_style_text, animation_info
 
 
     def paint(self):
@@ -985,7 +1017,7 @@ class Painter():
             print(f'Mode: {mode}\n')
 
             # Main function 
-            canvas, strokes, canvas_text, canvas_style, all_canvases_process, all_canvases_process_text, canvas_style_text = self.optimize(canvas, canvas_text, canvas_style, opt_steps, budget,
+            canvas, strokes, canvas_text, canvas_style, all_canvases_process, all_canvases_process_text, canvas_style_text, animation_info = self.optimize(canvas, canvas_text, canvas_style, opt_steps, budget,
                                                         brush_size, level=k, learned_strokes=learned_strokes, total_num_patches = total_num_patches, 
                                                         mode=mode, debug=False, all_canvases_process=all_canvases_process, all_canvases_process_text=all_canvases_process_text, 
                                                         canvas_style_text=canvas_style_text)
@@ -997,6 +1029,37 @@ class Painter():
             learned_strokes = strokes
             strokes_list.append(strokes)
             all_patches_limits.append(self.patches_limits)
+
+            torch.cuda.empty_cache()
+
+            # # Create gif 
+            if k > 0 and animation_info != None:
+                name = f'level_{k}_gif_package.pth'
+                fullname = os.path.join(self.args.save_dir, name)
+                torch.save(animation_info, fullname)
+                # animation_info is a dictionary with key = name of mask, value = {'canvas': general_canvas_process.clone(), 'strokes': all_strokes_4_gif}
+                # print('Creating animation...')
+                # for name, v in animation_info.items():
+                    
+                #     canvas_gif = v['canvas']
+                #     strokes_and_locations = v['strokes']    
+
+                #     # Creating gif here
+                #     print('name: ', name)
+                    
+                #     gif_dir = os.path.join(self.args.save_dir, 'gif', name)
+                #     os.makedirs(gif_dir, exist_ok=True)
+                    
+                #     utils.process_strokes_and_save(strokes_and_locations, canvas_gif, gif_dir, start_frame=0)
+
+                #     # Create gif 
+                #     output_file = os.path.join(gif_dir, f'{name}.gif')
+                #     utils.create_gif(gif_dir, output_file, fps=30)
+                    
+                #     print(f'{name} ....animation finished')
+
+                
+                
 
 
 

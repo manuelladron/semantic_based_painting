@@ -17,7 +17,9 @@ def _forward_pass_l2p_alpha(action, num_params, renderer, use_transp, i_til_rgb=
     stroke = 1 - renderer(action[:, :i_til_rgb]).unsqueeze(1) # [1, 128, 128] -> [1, 1, 128, 128]
     return stroke.repeat(1,3,1,1) # returns alpha with 3 channels
 
-def texturize(strokes, canvases, brush_size, t, num_params, writer, level, onehot=None, mask_patches=None, painter=None, segm_name='', use_transp=True):
+def texturize(strokes, canvases, brush_size, t, num_params, writer, level, 
+            onehot=None, mask_patches=None, painter=None, segm_name='', 
+            use_transp=True, patches_limits=None, general_canvas=None):
     """
     Processes textures stroke by stroke
 
@@ -38,6 +40,7 @@ def texturize(strokes, canvases, brush_size, t, num_params, writer, level, oneho
     
     # iterate over patches and apply texture one by one
     alphas, foregrounds = [], []
+    all_animation_strokes = []
     npatches = strokes.shape[0]
     
     for p in range(npatches): # Iterate over patches. Single stroke here
@@ -45,7 +48,17 @@ def texturize(strokes, canvases, brush_size, t, num_params, writer, level, oneho
         stroke = strokes[p].unsqueeze(0) # [1, 13]
 
         # Get texturized stroke
-        foreground, alpha = texturizer(painter, writer, stroke, 128, p, t, level, segm_name=segm_name)
+        foreground, alpha = texturizer(painter, writer, stroke, 128, p, t, level, segm_name=segm_name) # foreground and alpha are [3, 128, 128]
+
+        # Pad stroke for gif 
+        if patches_limits != None:
+
+            H, W = general_canvas.shape[2], general_canvas.shape[3]
+            padded_alpha = utils.pad_crop(alpha, patches_limits, H, W)
+            padded_foreground = utils.pad_crop(alpha, patches_limits, H, W)
+            animation_strokes = [padded_alpha, padded_foreground]
+            all_animation_strokes.append(animation_strokes)
+
 
         # Update canvas patch 
         canvas = canvas * (1 - alpha) + (foreground * alpha)  # [3, 128, 128]
@@ -61,7 +74,9 @@ def texturize(strokes, canvases, brush_size, t, num_params, writer, level, oneho
 
     # print(f'Invalid strokes in level {level}: {invalid_strokes}')
     # print(f'Valid strokes in level {level}: {valid_strokes}')
-
+    if patches_limits != None:
+        return canvases, foregrounds, alphas, all_animation_strokes
+        
     return canvases, foregrounds, alphas
 
 

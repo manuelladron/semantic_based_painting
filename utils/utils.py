@@ -5,6 +5,7 @@ import numpy as np
 import torch 
 import cv2 
 from PIL import Image
+import imageio
 from skimage.segmentation import find_boundaries
 from models.renderers import FCN, FCN_2outputs
 from torch.utils.tensorboard import SummaryWriter
@@ -734,7 +735,7 @@ def any_column_true(A):
 
 def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_size, mask, 
                         renderer, level, mode, writer=None, texturize=False, painter=None, segm_name='', 
-                        second_canvas=None, third_canvas=None, use_transp=True, patches_limits=None):
+                        second_canvas=None, third_canvas=None, use_transp=True, patches_limits=None, general_canvas=None):
     
     """Render stroke parameters into canvas, and optionally into a second and third canvases (for segmentation masks)
     
@@ -764,10 +765,14 @@ def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_siz
 
     i_til_rgb = 10 if num_params == 13 else 8
 
-    all_canavses_4_gif = dict()
+    all_strokes_4_gif = dict()
 
+    num_valid_strokes = 0
     for i in range(npatches):
-        all_canavses_4_gif[str(i)] = []
+        all_strokes_4_gif[str(i)] = []
+
+        #print(f'npatch: {i} / {npatches}')
+        patch_limits_this_canvas = patches_limits[i]
         
         this_canvas = canvas[i].unsqueeze(0) # [1, 3, 128, 128]
         if second_canvas != None:
@@ -781,28 +786,46 @@ def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_siz
             strokes_patch = strokes[i] # [budget, num_params]
             # canvas here is the same 
             for j in range(budget):
+
+                #print(f'stroke number: {j} / {budget}')
                 stroke_t = strokes_patch[j].unsqueeze(0) # [1, num_params]
                 
                 # This is a valid stroke and should be within the mask 
                 if stroke_indices[i, j]:
                     assert torch.all(stroke_t != -1), "Wrong stroke, check the filter algorithm" # Double check it's not a bad stroke 
-
-                    if texturize:
-                        this_canvas, _ ,_ = RU.texturize(stroke_t, this_canvas, brush_size, j, num_params, writer, level, painter=painter, segm_name=segm_name, use_transp=use_transp)
-                        if second_canvas != None:
-                            this_second_canvas, _ ,_ = RU.texturize(stroke_t, this_second_canvas, brush_size, j, num_params, writer, level, painter=painter, segm_name=segm_name, use_transp=use_transp)
-                        if third_canvas != None:
-                            this_third_canvas, _ ,_ = RU.texturize(stroke_t, this_third_canvas, brush_size, j, num_params, writer, level, painter=painter, segm_name=segm_name, use_transp=use_transp)
+                    num_valid_strokes += 1
                     
-                    else:
-                        this_canvas = forward_renderer(stroke_t, this_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0), use_transp=use_transp) # [if passing mask, apply filterwise]
+                    if texturize:
+                        this_canvas, _ ,_,  = RU.texturize(stroke_t, this_canvas, brush_size, j, num_params, writer, level, painter=painter, segm_name=segm_name, use_transp=use_transp, patches_limits=None, general_canvas=None)
                         if second_canvas != None:
-                            this_second_canvas = forward_renderer(stroke_t, this_second_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0), use_transp=use_transp) # [if passing mask, apply filterwise]
+                            this_second_canvas, _ ,_,  = RU.texturize(stroke_t, this_second_canvas, brush_size, j, num_params, writer, level, painter=painter, segm_name=segm_name, use_transp=use_transp, patches_limits=None, general_canvas=None)
+                        
+                        # Third canvas is progres of the painting 
                         if third_canvas != None:
-                            this_third_canvas = forward_renderer(stroke_t, this_third_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0), use_transp=use_transp) # [if passing mask, apply filterwise]
+                            try:
+                                this_third_canvas, _ ,_, strokes_gif  = RU.texturize(stroke_t, this_third_canvas, brush_size, j, num_params, writer, level, painter=painter, segm_name=segm_name, use_transp=use_transp, patches_limits=None, general_canvas=general_canvas) # patches_limits=patch_limits_this_canvas,
+                                #all_strokes_4_gif[str(i)].append((strokes_gif, patch_limits_this_canvas))
+                            except: 
+                                print(f'error in npatch: {i} / {npatches} | stroke number: {j} / {budget}')
+                                #pdb.set_trace()
+                                continue 
+                        # strokes_gif is a list of 1, containing another list of [alpha_stroke, color_stroke]
 
-                    all_canavses_4_gif[str(i)].append(this_canvas)
-            
+                    else:
+                        this_canvas = forward_renderer(stroke_t, this_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0), use_transp=use_transp, patches_limits=None, general_canvas=None) # [if passing mask, apply filterwise]
+                        if second_canvas != None:
+                            this_second_canvas  = forward_renderer(stroke_t, this_second_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0), use_transp=use_transp, patches_limits=None, general_canvas=None) # [if passing mask, apply filterwise]
+                        if third_canvas != None:
+                            #print('in main func: ', patch_limits_this_canvas)
+                            #try:
+                            this_third_canvas = forward_renderer(stroke_t, this_third_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0), use_transp=use_transp, patches_limits=None, general_canvas=None) # [if passing mask, apply filterwise]
+                                # strokes_gif is a list of 1, containing another list of [alpha_stroke, color_stroke]
+                                #all_strokes_4_gif[str(i)].append((strokes_gif, patch_limits_this_canvas))
+                            
+                            # except: 
+                            #     print(f'error in npatch: {i} / {npatches} | stroke number: {j} / {budget}')
+                            #     continue 
+                           
             # At uniform mode, we need to add canvases only if they are valid 
             if mode == 'uniform':
                 new_canvases.append(this_canvas)
@@ -837,7 +860,7 @@ def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_siz
         if third_canvas != None:
             new_third_canvases = third_canvas
     
-    return new_canvases, successful, new_second_canvases, new_third_canvases, all_canavses_4_gif
+    return new_canvases, successful, new_second_canvases, new_third_canvases, all_strokes_4_gif, num_valid_strokes # dictionary with key = patch_i, value = [strokes, patches_limits]
 
 
 def render(canvas, strokes, budget, brush_size, renderer, num_params=13, level=None, texturize=False, painter=None, writer=None, segm_name='', use_transp=True):
@@ -863,7 +886,10 @@ def render(canvas, strokes, budget, brush_size, renderer, num_params=13, level=N
     return canvas, None, None
 
 
-def forward_renderer(stroke, canvas, brush_size, num_params, renderer, device, mask=None, return_alpha=False, use_transp=True):
+def forward_renderer(stroke, canvas, brush_size, num_params, renderer, 
+                    device, mask=None, return_alpha=False, 
+                    use_transp=True, patches_limits=None, 
+                    general_canvas=None):
     """
     Renderer network takes in all stroke parameters except for RGB. Renderer outputs an alpha stroke of 128x128 with a white background. 
     Stroke black, background white 
@@ -877,6 +903,8 @@ def forward_renderer(stroke, canvas, brush_size, num_params, renderer, device, m
     width = canvas.shape[2]
     
     original_canvas = canvas.clone()
+
+    strokes_animation = []
 
     # Make it opaque and clip width -> Transparency is being controlled by 
     if use_transp == False:
@@ -892,7 +920,6 @@ def forward_renderer(stroke, canvas, brush_size, num_params, renderer, device, m
     # Multiply alpha by RGB params
     color_stroke = alpha * stroke[: , -3:].view(-1, 3, 1, 1) # [N, 3, 128, 128]
 
-    #pdb.set_trace()
     # Reshape alpha 
     alpha = alpha.view(-1, 1, width, width) # [N, 1, 128, 128]
     
@@ -900,6 +927,17 @@ def forward_renderer(stroke, canvas, brush_size, num_params, renderer, device, m
     # 1 - alpha = 0 in the stroke regions, and 1 in the background. It zeroes out the canvas at the stroke region and adds canvas with color stroke, whose bckg = 0
     canvas = canvas * (1-alpha) + color_stroke 
     
+    if patches_limits != None:
+        """
+        H, W = general_canvas.shape[2], general_canvas.shape[3]
+        padded_alpha = pad_crop(alpha, patches_limits, H, W)
+        #padded_color_stroke = pad_crop(color_stroke, patches_limits, H, W)
+        padded_color_stroke = padded_alpha * stroke[: , -3:].view(-1, 3, 1, 1)
+        strokes_animation = [[padded_alpha, padded_color_stroke]]
+        """
+        strokes_animation = [[alpha, color_stroke]]
+        return canvas.clip(min=0, max=1), strokes_animation
+
     # return original canvas if the stroke is outside the mask 
     # TODO: check that we are passing the right mask 
     if mask != None:
@@ -1121,3 +1159,48 @@ def order_tuple_list_by_index(tuple_list, index_list):
     index_dict = {index_list[i]: i for i in range(len(index_list))}
     ordered_tuple_list = sorted(tuple_list, key=lambda x: index_dict.get(x[0], len(tuple_list)))
     return ordered_tuple_list
+
+
+def save_canvas_to_image(canvas, output_dir, frame_number):
+    canvas = canvas.squeeze(0)  # Remove the batch dimension
+    canvas_np = canvas.permute(1, 2, 0).detach().cpu().numpy()
+    img = Image.fromarray((canvas_np * 255).astype(np.uint8))
+    img.save(os.path.join(output_dir, f"frame_{frame_number:04d}.png"))
+
+
+def process_strokes_and_save(stroke_dict, canvas, output_dir, start_frame=0):
+    frame_number = start_frame
+
+    for patch_strokes in stroke_dict.values():
+        
+        for stroke, location in patch_strokes:
+            alpha, color_stroke = stroke[0] # stroke is a list of list 
+            
+            # Pad here 
+            H, W = canvas.shape[2], canvas.shape[3]
+            padded_alpha = pad_crop(alpha, location, H, W)
+            #padded_color_stroke = pad_crop(color_stroke, patches_limits, H, W)
+            padded_color_stroke = padded_alpha * color_stroke[: , -3:].view(-1, 3, 1, 1)
+
+            padded_alpha = padded_alpha.to(canvas.device)
+            padded_color_stroke = padded_color_stroke.to(canvas.device)
+
+            # Update the canvas using the blending formula
+            canvas = canvas * (1 - padded_alpha) + (padded_color_stroke * padded_alpha)
+
+            # Save the intermediate canvas as an image
+            save_canvas_to_image(canvas, output_dir, frame_number)
+            frame_number += 1
+
+    print(f'Strokes for gif saved in: {output_dir}')
+    return frame_number
+
+
+def create_gif(input_dir, output_file, fps=30):
+    images = []
+    image_files = sorted(os.listdir(input_dir))
+
+    for filename in image_files:
+        images.append(imageio.imread(os.path.join(input_dir, filename)))
+
+    imageio.mimsave(output_file, images, fps=fps)

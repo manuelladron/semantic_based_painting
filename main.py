@@ -1,14 +1,14 @@
 import time 
 import os 
-import sys
 import argparse 
 import pdb 
 from src.painter import Painter 
 
+
 def create_parser():
     parser = argparse.ArgumentParser(description='Stroke Optimization')
 
-    parser.add_argument('--exp_name', type=str, default = 'exp_164_curved_v3') # exp 134, 135 is GOOD! 
+    parser.add_argument('--exp_name', type=str, default = 'exp_183_marble') # exp 134, 135 is GOOD! 
     
     # strategy settings
     parser.add_argument('--brush_type', type=str, default='curved', choices=['straight', 'curved'])
@@ -21,9 +21,9 @@ def create_parser():
     parser.add_argument('--use_segmentation_contours', type=bool, default = False)
 
     # Segmentation 
-    parser.add_argument('--use_segmentation_mask', type=bool, default = True)
-    parser.add_argument('--filter_strokes', type=bool, default = True)
-    parser.add_argument('--return_segmented_areas', type=bool, default = True)
+    parser.add_argument('--use_segmentation_mask', type=bool, default = True) # True
+    parser.add_argument('--filter_strokes', type=bool, default = True) # true
+    parser.add_argument('--return_segmented_areas', type=bool, default = True) # true 
 
     parser.add_argument('--use_edges', type=bool, default = False)
 
@@ -34,15 +34,15 @@ def create_parser():
     parser.add_argument('--overlap', type=int, default=20) 
 
     parser.add_argument('--brush_sizes', type=list, default=[0.7, 0.5, 0.4, 0.05]) # abstracted [0.8, 0.5, 0.2] # realistic [0.8, 0.5, 0.2, 0.05]
-    parser.add_argument('--budgets', type=list, default=[16, 9, 9, 9])  # abstracted [9, 9, 49]                # realistic  [9, 9, 49, 64]
-    parser.add_argument('--iter_steps', type=list, default=[300, 300, 400, 300]) # [300, 300, 300]
+    parser.add_argument('--budgets', type=list, default=[9, 16, 49, 64])  # abstracted [9, 9, 49]       [9, 9, 9, 16]          # realistic  [9, 9, 49, 64] # [16, 9, 16, 25]
+    parser.add_argument('--iter_steps', type=list, default=[300, 300, 300, 300]) # [300, 300, 300]
 
     parser.add_argument('--number_natural_patches', type=int, default=[40, 30, 25])  # [25, 30, 25] # [30, 50, 60] WE DID NOT DEFINE THIS IN THE PAPER 
 
     # misc settings 
     parser.add_argument('--upsample', type=bool, default = True)
     parser.add_argument('--aspect_ratio_downsample', type=float, default=3)
-    parser.add_argument('--image_path', type=str, default = '/home/manuelladron/projects/npp/stroke_opt_main/images/landscapes/lighthouse4.jpeg') # /home/manuelladron/projects/npp/sigg-asia-imgs/siggraph_asia/landscapes/dalle_1.png
+    parser.add_argument('--image_path', type=str, default = '/home/manuelladron/projects/npp/stroke_opt_main/images/buildings/marble_detail.jpeg') # /home/manuelladron/projects/npp/sigg-asia-imgs/siggraph_asia/landscapes/dalle_1.png
     
     parser.add_argument('--save_dir', type=str, default = '/home/manuelladron/projects/npp/stroke_opt_main/stroke_opt_23/results')
     parser.add_argument('--canvas_size', type=int, default=128)
@@ -91,9 +91,9 @@ if __name__ == '__main__':
     save_dir = os.path.join(args.save_dir, 'imgs')
     log_dir = os.path.join(args.save_dir, 'logs')
     
-    args.save_dir = os.path.join(save_dir, args.exp_name, basename)
-    args.log_dir = os.path.join(log_dir, args.exp_name, basename)
-    
+    args.save_dir = os.path.join(save_dir, args.exp_name)#, basename)
+    args.log_dir = os.path.join(log_dir, args.exp_name)#, basename)
+
     os.makedirs(args.save_dir, exist_ok=True)
     os.makedirs(args.log_dir, exist_ok=True)
 
