@@ -2,6 +2,14 @@
 
 This repository contains a semantic-based painting optimization algorithm which aims to transform a given input image into a painting. The algorithm takes advantage of modern computer vision techniques, segmentation networks, and a differentiable renderer to generate results.
 
+
+
+![Reference Image 1](media_readme/dinner_dog_segm_mask_overlay_original.jpg)
+
+![Reference Image 2](media_readme/high_error_src_img_person_level_1.jpg)
+
+![Reference Image 2](media_readme/dinner_dog_process_text_mask_person_lvl_3.jpg)
+
 ## What It Does
 
 The algorithm aims to efficiently optimize a collection of stroke parameters to create a painting from a given image input. The method starts with an image and optimizes a parameter vector of strokes. When rendered on a canvas, it recreates the input image in the form of a painting. The approach is designed to efficiently manage any input size or aspect ratio. It divides the canvas into semantic areas using a segmentation network. This provides a higher control over the painting compared to previous optimization and neural methods.
