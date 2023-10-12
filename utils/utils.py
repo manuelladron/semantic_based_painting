@@ -17,7 +17,7 @@ from src.segmentation import segment_image
 from utils import render_utils as RU
 from torchvision.utils import save_image
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") # 
 
 def save_img(image, dirpath, img_name):
     img_name_complete = os.path.join(dirpath, img_name)
@@ -169,7 +169,7 @@ def resize_array(array, target_size):
     resized_array = cv2.resize(array, (height, width), interpolation=cv2.INTER_NEAREST)
     return resized_array
 
-def process_img(args, img_path, writer, style_img_path=None, resize_value=128, min_width=1500):
+def process_img(args, img_path, writer, style_img_path=None, resize_value=128, min_width=1800):
     """
     Receives image path, opens and resizes it and returns tensor 
     """
@@ -178,6 +178,7 @@ def process_img(args, img_path, writer, style_img_path=None, resize_value=128, m
     src_img = cv2.imread(img_path, cv2.IMREAD_COLOR)[:,:,::-1] # from BGR to RGB uint8 [H,W,3]
     print(f'Original image size H={src_img.shape[0]} x W={src_img.shape[1]}')
     
+    new_h, new_w = src_img.shape[0], src_img.shape[1]
     style_img = None # to return 
     # If style image 
     if style_img_path != None:
@@ -190,6 +191,7 @@ def process_img(args, img_path, writer, style_img_path=None, resize_value=128, m
         new_h, new_w = resize_value
     
     else: 
+        
         # Decrease size if it's too big 
         if src_img.shape[0] > min_width or src_img.shape[1] > min_width:
             
@@ -209,6 +211,7 @@ def process_img(args, img_path, writer, style_img_path=None, resize_value=128, m
                 new_w = src_img.shape[1]
 
         elif args.upsample and (new_h < min_width or new_w < min_width): # Adjust it to be at least over 1000 pixels so the painting is not too small 
+            print('upsampling ...')
             if src_img.shape[0] >= src_img.shape[1]:
                 src_img = image_resize(src_img, height=min_width)
             else:

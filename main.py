@@ -8,7 +8,7 @@ from src.painter import Painter
 def create_parser():
     parser = argparse.ArgumentParser(description='Stroke Optimization')
 
-    parser.add_argument('--exp_name', type=str, default = 'exp_183_marble') # exp 134, 135 is GOOD! 
+    parser.add_argument('--exp_name', type=str, default = 'exp_204_italy_real') # exp 134, 135 is GOOD! 
     
     # strategy settings
     parser.add_argument('--brush_type', type=str, default='curved', choices=['straight', 'curved'])
@@ -21,28 +21,28 @@ def create_parser():
     parser.add_argument('--use_segmentation_contours', type=bool, default = False)
 
     # Segmentation 
-    parser.add_argument('--use_segmentation_mask', type=bool, default = True) # True
-    parser.add_argument('--filter_strokes', type=bool, default = True) # true
-    parser.add_argument('--return_segmented_areas', type=bool, default = True) # true 
+    parser.add_argument('--use_segmentation_mask', type=bool, default = False) # True
+    parser.add_argument('--filter_strokes', type=bool, default = False) # true
+    parser.add_argument('--return_segmented_areas', type=bool, default = False) # true 
 
     parser.add_argument('--use_edges', type=bool, default = False)
 
     parser.add_argument('--start_using_masks', type=int, default = 1)
     parser.add_argument('--start_natural_level', type=int, default = 1)
-    parser.add_argument('--patch_strategy_detail', type=str, default='natural', choices=['uniform', 'natural'])
+    parser.add_argument('--patch_strategy_detail', type=str, default='uniform', choices=['uniform', 'natural'])
 
     parser.add_argument('--overlap', type=int, default=20) 
 
-    parser.add_argument('--brush_sizes', type=list, default=[0.7, 0.5, 0.4, 0.05]) # abstracted [0.8, 0.5, 0.2] # realistic [0.8, 0.5, 0.2, 0.05]
-    parser.add_argument('--budgets', type=list, default=[9, 16, 49, 64])  # abstracted [9, 9, 49]       [9, 9, 9, 16]          # realistic  [9, 9, 49, 64] # [16, 9, 16, 25]
+    parser.add_argument('--brush_sizes', type=list, default=[0.7, 0.4, 0.2, 0.05]) # abstracted [0.8, 0.5, 0.2] # realistic [0.8, 0.5, 0.2, 0.05]
+    parser.add_argument('--budgets', type=list, default=[9, 49, 49, 64])  # abstracted [9, 9, 49]   # painterly [9, 16, 16, 9]  # realistic  [9, 9, 49, 64] 
     parser.add_argument('--iter_steps', type=list, default=[300, 300, 300, 300]) # [300, 300, 300]
 
-    parser.add_argument('--number_natural_patches', type=int, default=[40, 30, 25])  # [25, 30, 25] # [30, 50, 60] WE DID NOT DEFINE THIS IN THE PAPER 
+    parser.add_argument('--number_natural_patches', type=int, default=[40, 60, 60])  # [25, 30, 25] # [30, 50, 60] # painterly [25, 30, 60]
 
     # misc settings 
     parser.add_argument('--upsample', type=bool, default = True)
     parser.add_argument('--aspect_ratio_downsample', type=float, default=3)
-    parser.add_argument('--image_path', type=str, default = '/home/manuelladron/projects/npp/stroke_opt_main/images/buildings/marble_detail.jpeg') # /home/manuelladron/projects/npp/sigg-asia-imgs/siggraph_asia/landscapes/dalle_1.png
+    parser.add_argument('--image_path', type=str, default = '/home/manuelladron/projects/npp/stroke_opt_main/images/streets/italy.jpeg') 
     
     parser.add_argument('--save_dir', type=str, default = '/home/manuelladron/projects/npp/stroke_opt_main/stroke_opt_23/results')
     parser.add_argument('--canvas_size', type=int, default=128)
@@ -99,7 +99,7 @@ if __name__ == '__main__':
 
     # Initialize painter 
     P = Painter(args)
-    # Call main function and measure time 
+    # Call main function and measure time  # 
     st = time.time()
     P.paint()
     end = time.time()

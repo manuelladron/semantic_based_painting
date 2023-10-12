@@ -83,7 +83,7 @@ class Painter():
         src_img, mask, npatches_h, npatches_w, segm_mask_ids, boundaries, segm_cat_ids, seg_labels, binary_masks_list, self.segm_mask_color, style_img = utils.process_img(self.args, 
                                                                                                             self.args.image_path, writer=self.logger, 
                                                                                                             resize_value=None, 
-                                                                                                            style_img_path=self.args.style_img_path) # torch tensor [1, 3, H, W]
+                                                                                                            style_img_path=self.args.style_img_path) # torch tensor [1, 3, H, W] #
         self.npatches_total = npatches_h * npatches_w
         self.npatches_h, self.npatches_w  = npatches_h, npatches_w
         
