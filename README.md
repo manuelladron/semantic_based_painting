@@ -1,14 +1,13 @@
-# Semantic-Based Painting Optimization Algorithm
+# Segmentation-Based Parametric Painting
 
 This repository contains a semantic-based painting optimization algorithm which aims to transform a given input image into a painting. The algorithm takes advantage of modern computer vision techniques, segmentation networks, and a differentiable renderer to generate results.
 
 
+![Reference Image 1](media_readme/teaser_img.png)
 
-![Reference Image 1](media_readme/dinner_dog_segm_mask_overlay_original.jpg)
+![Reference Image 2](media_readme/giraffe_1.gif)
 
-![Reference Image 2](media_readme/high_error_src_img_person_level_1.jpg)
-
-![Reference Image 2](media_readme/dinner_dog_process_text_mask_person_lvl_3.jpg)
+<!-- ![Reference Image 2](media_readme/dinner_dog_process_text_mask_person_lvl_3.jpg) -->
 
 ## What It Does
 
@@ -23,6 +22,10 @@ The algorithm aims to efficiently optimize a collection of stroke parameters to 
   - Provides precision over the granularity of each semantic zone in the artwork.
   - Ensures strokes remain within the designated semantic segment, improving the painting's accuracy.
 
+- **Visual Working Memory**:
+  - Uses a dynamic attention maps system to focus on areas that need more attention.
+  - Yields an organic feel to the painting.
+
 - **Stroke Initialization, Renderer, and Blending**:
   - Uses the stroke parameter representation and differentiable renderer.
   - Strokes are parameterized by a 13-dimensional tuple encoding various properties like start, middle, end points, radii, transparency, and RGB color.
@@ -36,8 +39,9 @@ The algorithm aims to efficiently optimize a collection of stroke parameters to 
 
 ### 1. Requirements:
 
-- Python
+- Python 3
 - Necessary libraries and dependencies (refer to `requirements.txt` if provided).
+- Download the renderer and perceptual network [here](https://drive.google.com/drive/folders/1f1dMbU5Yj9T-lGq0ZTc1MPPPJ-R7v0YX?usp=sharing) and store them in a folder under the main directory.
 
 ### 2. Command:
 
@@ -52,17 +56,14 @@ python main.py [options]
 - `--texturize`: Use texturize feature (default: True)
 ... and many more. (For a full list of arguments and their defaults, refer to the `main.py` file)
 
-To paint with segmentation set the following arguments to True:
-- `--use_segmentation_mask`
-- `--filter_strokes`
-- `--return_segmented_areas`
+To paint with a painterly style set style to "painterly". To get a realistic style, set it to "realistic"
+- `--style`
 
 ### 4. Example:
 
 ```bash
-python main.py --image_path /path/to/image.jpg --save_dir /path/to/save_directory
+python main.py --image_path /path/to/image.jpg --save_dir /path/to/save_directory --style painterly
 ```
-
 
 ## Method Overview
 
@@ -70,6 +71,7 @@ The method uses various techniques and algorithms to produce a painting from an 
 
 - **Semantic Segmentation**: Dividing the canvas into areas of interest.
 - **Layered Painting**: A coarse-to-fine progression.
+- **Visual Working Memory**: A dynamic attention maps system that focus on areas that need more attention.
 - **Optimization & Loss Functions**: Ensuring the painting closely resembles the input image.
 
 ### Implementation Details:
@@ -79,15 +81,21 @@ The method uses various techniques and algorithms to produce a painting from an 
 - **Canvas Background**: Black.
 - **Segmentation Network**: Uses the DETR model with a CNN (ResNet) backbone followed by an encoder-decoder Transformer.
 
+
+## More Results:
+
+![Reference Image 3](media_readme/motorcycle_0.gif)
+
+![Reference Image 4](media_readme/onemushroom_texture_lvl_0.jpg)
+
+![Reference Image 5](media_readme/painterly_vs_realistic_middle.png)
+
 ## References:
 
 - [Huang, et al. 2019. Learning to Paint]
+- [Liu et al. 2021. Paint Transformer]
 - [DETR: Carion, et al. 2020. End-to-End Object Detection with Transformers]
-... and other references mentioned in the paper.
 
-## Citation
-
-If you find this work useful in your research, please consider citing the provided paper.
 
 ## Feedback
 
