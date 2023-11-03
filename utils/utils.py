@@ -16,6 +16,9 @@ from colour import Color
 from src.segmentation import segment_image
 from utils import render_utils as RU
 from torchvision.utils import save_image
+import matplotlib.pyplot as plt
+import seaborn as sns
+import math 
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") # 
 
@@ -180,6 +183,7 @@ def process_img(args, img_path, writer, style_img_path=None, resize_value=128, m
     
     new_h, new_w = src_img.shape[0], src_img.shape[1]
     style_img = None # to return 
+    
     # If style image 
     if style_img_path != None:
         style_img = cv2.imread(style_img_path, cv2.IMREAD_COLOR)[:,:,::-1] # from BGR to RGB uint8 [H,W,3]
@@ -191,7 +195,6 @@ def process_img(args, img_path, writer, style_img_path=None, resize_value=128, m
         new_h, new_w = resize_value
     
     else: 
-        
         # Decrease size if it's too big 
         if src_img.shape[0] > min_width or src_img.shape[1] > min_width:
             
@@ -238,7 +241,7 @@ def process_img(args, img_path, writer, style_img_path=None, resize_value=128, m
     if args.paint_by_patches:
         src_img, npatches_h, npatches_w, mask = resize_based_on_patches(src_img, args, new_h, new_w, mask=None) # src img is [H, W, 3]
     
-    if style_img_path != None:
+    if style_img_path != None: # resize style image based on the resized input image 
         target_height, target_width, _ = src_img.shape
         style_img = cv2.resize(style_img, (target_width, target_height))
         assert style_img.shape == src_img.shape, "style image not the same shape as source image"
@@ -267,7 +270,7 @@ def process_img(args, img_path, writer, style_img_path=None, resize_value=128, m
         segm_mask_overlay = torch.from_numpy(segm_mask_overlay.transpose(2,0,1)) # [C, H, W]
 
         # segmentation mask 
-        segm_mask_color = normalize_img(segm_mask_color)
+        # segm_mask_color = normalize_img(segm_mask_color) # This was making the image be all black
         segm_mask_color = torch.from_numpy(segm_mask_color.transpose(2,0,1)) # [C, H, W]
         
         # Depict boundaries
@@ -278,8 +281,10 @@ def process_img(args, img_path, writer, style_img_path=None, resize_value=128, m
 
         # Save 
         basename = os.path.basename(args.image_path).split(".")[0]
+        
         img_name = f'{basename}_segm_mask_overlay_original.jpg'
         save_img(segm_mask_overlay.squeeze()/255., args.save_dir, img_name)
+        
         img_name = f'{basename}_segm_mask_original.jpg'
         save_img(segm_mask_color_with_boundaries.squeeze()/255., args.save_dir, img_name)
 
@@ -639,6 +644,8 @@ def high_error_candidates(canvas, patches_list, patches_loc_list, level, num_pat
 
 def get_natural_patches(number_uniform_patches, source_img, general_canvas, logger, level, mask, K_number_natural_patches, path=None, name=''):
     """
+    ****** Visual working memory in the paper *******
+
     Gets source_image patches with a high-error map algorithm and returns those patches, their location, indices of where they are, 
     error value and mask patches if there is any mask 
 
@@ -646,7 +653,7 @@ def get_natural_patches(number_uniform_patches, source_img, general_canvas, logg
         number_uniform_patches: int 
         source_img:     a tensor of shape [1, 3, H, W]
         general_canvas: a tensor of shape [1, 3, H, W]
-        level: an int indicating the painting level 
+        level:          an int indicating the painting level 
         mask:           a tensor of shape [1, 1, H, W]
         K_number_natural_patches: an int 
 
@@ -654,7 +661,7 @@ def get_natural_patches(number_uniform_patches, source_img, general_canvas, logg
     """
     print(f'\n Getting natural patches: {name}')
     
-    # 1) Start with a slightly smaller number P, than the uniform approach 
+    # 1) Start with a slightly smaller number P, than the uniform approach (not using it now)
     num_patches = int(number_uniform_patches / 1.0)
     
     # Generate a list of valid patches T < P which if a mask is provided, they have to fall within the mask. 
@@ -671,6 +678,7 @@ def get_natural_patches(number_uniform_patches, source_img, general_canvas, logg
         return -1, -1, -1, -1, -1
     
     print(f'\nName: {name}, num_natural_patches: {K_number_natural_patches}')
+    
     # 3) Crops those patches in the general canvas and calculate error between them, return maximum K_number_natural_patches
     patches_limits, target_patches, indices, values = high_error_candidates(general_canvas, list_natural_src_patches, list_patches_locations, 
                                                                             level, K_number_natural_patches, name)
@@ -792,6 +800,7 @@ def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_siz
 
                 #print(f'stroke number: {j} / {budget}')
                 stroke_t = strokes_patch[j].unsqueeze(0) # [1, num_params]
+                rgb = stroke_t[:, 10:]
                 
                 # This is a valid stroke and should be within the mask 
                 if stroke_indices[i, j]:
@@ -799,15 +808,18 @@ def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_siz
                     num_valid_strokes += 1
                     
                     if texturize:
-                        this_canvas, _ ,_,  = RU.texturize(stroke_t, this_canvas, brush_size, j, num_params, writer, level, painter=painter, segm_name=segm_name, use_transp=use_transp, patches_limits=None, general_canvas=None)
+                        this_canvas, _ ,_, _  = RU.texturize(stroke_t, this_canvas, brush_size, j, num_params, writer, level, painter=painter, segm_name=segm_name, use_transp=use_transp, patches_limits=None, general_canvas=None)
                         if second_canvas != None:
-                            this_second_canvas, _ ,_,  = RU.texturize(stroke_t, this_second_canvas, brush_size, j, num_params, writer, level, painter=painter, segm_name=segm_name, use_transp=use_transp, patches_limits=None, general_canvas=None)
+                            this_second_canvas, _ ,_, _  = RU.texturize(stroke_t, this_second_canvas, brush_size, j, num_params, writer, level, painter=painter, segm_name=segm_name, use_transp=use_transp, patches_limits=None, general_canvas=None)
                         
-                        # Third canvas is progres of the painting 
+                        # Third canvas is progress of the painting 
                         if third_canvas != None:
                             try:
+                                #pdb.set_trace()
                                 this_third_canvas, _ ,_, strokes_gif  = RU.texturize(stroke_t, this_third_canvas, brush_size, j, num_params, writer, level, painter=painter, segm_name=segm_name, use_transp=use_transp, patches_limits=None, general_canvas=general_canvas) # patches_limits=patch_limits_this_canvas,
                                 #all_strokes_4_gif[str(i)].append((strokes_gif, patch_limits_this_canvas))
+                                #pdb.set_trace()
+                            
                             except: 
                                 print(f'error in npatch: {i} / {npatches} | stroke number: {j} / {budget}')
                                 #pdb.set_trace()
@@ -816,15 +828,17 @@ def render_with_filter(canvas, strokes, patch_indices, stroke_indices, brush_siz
 
                     else:
                         this_canvas = forward_renderer(stroke_t, this_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0), use_transp=use_transp, patches_limits=None, general_canvas=None) # [if passing mask, apply filterwise]
+                        
                         if second_canvas != None:
                             this_second_canvas  = forward_renderer(stroke_t, this_second_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0), use_transp=use_transp, patches_limits=None, general_canvas=None) # [if passing mask, apply filterwise]
+                        
                         if third_canvas != None:
                             #print('in main func: ', patch_limits_this_canvas)
                             #try:
-                            this_third_canvas = forward_renderer(stroke_t, this_third_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0), use_transp=use_transp, patches_limits=None, general_canvas=None) # [if passing mask, apply filterwise]
-                                # strokes_gif is a list of 1, containing another list of [alpha_stroke, color_stroke]
-                                #all_strokes_4_gif[str(i)].append((strokes_gif, patch_limits_this_canvas))
-                            
+                            this_third_canvas, strokes_gif = forward_renderer(stroke_t, this_third_canvas, brush_size, num_params, renderer, device, mask=mask[i].unsqueeze(0), use_transp=use_transp, patches_limits=patch_limits_this_canvas, general_canvas=None) # [if passing mask, apply filterwise]
+                            # strokes_gif is a list of 1, containing another list of [alpha_stroke, color_stroke]
+                            all_strokes_4_gif[str(i)].append((strokes_gif, patch_limits_this_canvas, rgb)) # pass rgb for a better reconstruction later on when making the gif 
+                            #print('\nadded strokes 4 gif!\n')
                             # except: 
                             #     print(f'error in npatch: {i} / {npatches} | stroke number: {j} / {budget}')
                             #     continue 
@@ -871,6 +885,7 @@ def render(canvas, strokes, budget, brush_size, renderer, num_params=13, level=N
     :param canvas: [n_patches, 3, 128, 128]
     :param strokes: [budget, n_patches, num_params]
     """
+    all_strokes_4_gif = dict()
     
     # Iterate over budget and render strokes one by one 
     for t in range(budget):
@@ -879,7 +894,7 @@ def render(canvas, strokes, budget, brush_size, renderer, num_params=13, level=N
         stroke_t = strokes[t]#.unsqueeze(0) # [num_patches, 13]
 
         if texturize:
-            canvas, _ ,_ = RU.texturize(stroke_t, canvas, brush_size, t, num_params, writer, level, painter=painter, segm_name=segm_name, use_transp=use_transp)
+            canvas, _ ,_, _ = RU.texturize(stroke_t, canvas, brush_size, t, num_params, writer, level, painter=painter, segm_name=segm_name, use_transp=use_transp)
         
         else:
             i_til_rgb = 10 if num_params == 13 else 8
@@ -1060,7 +1075,7 @@ def blend_padded_canvas(padded_canvas, source_img, general_canvas, first=False, 
 
 def blend_all_canvases(canvases, patches_limits, general_canvas, source_img, logger, resize_factor):
     """
-    Blends all canvases by padding them and applying a normal blending formula into a bigger general_canvas, decrase their sizes for a global loss (CLIP)
+    Blends all canvases by padding them and applying a normal blending formula into a bigger general_canvas, decrease their sizes for a global loss (CLIP)
     :param canvases: a tensor of shape [n_patches, 3, 128, 128]
     :param patches_limits: a list of n_patches tuples of shape ((h_st, h_end), (w_st, w_end))
     :param general_canvas: the global big canvas of shape [1, 3, H, W]
@@ -1207,3 +1222,131 @@ def create_gif(input_dir, output_file, fps=30):
         images.append(imageio.imread(os.path.join(input_dir, filename)))
 
     imageio.mimsave(output_file, images, fps=fps)
+
+
+def cap(value, min_value, max_value):
+    return max(min_value, min(value, max_value))
+
+def get_absolute_stroke_coordinates(strokes, patches_limits, general_canvas):
+    """
+    Gets strokes parameters and returns a list of strokes with absolute and normalized coordinates in relation to the overall canvas
+
+    Args:
+    strokes (tensor): Strokes of shape [budget, num_patches, 13]
+    patches_limits (list): The list patches limits length same as second dimension of strokes
+    general_canvas (tensor): General canvas of shape [1, 3, H, W]
+
+    Returns:
+    normalized absolute middle x,y coordinates of the strokes in relation to the general canvas
+    """
+
+    H, W = general_canvas.shape[2], general_canvas.shape[3]
+    
+    middle_coords_strokes = []
+
+    total_strokes = 0
+    for i in range(len(patches_limits)): # patches_limits are in absolute pixels 
+        
+        h_st = patches_limits[i][0][0]
+        h_end = patches_limits[i][0][1]
+        w_st = patches_limits[i][1][0]
+        w_end = patches_limits[i][1][1]
+
+        for j in range(strokes.shape[0]): # each stroke individually
+            this_stroke = strokes[j, i] # 13-tuple
+            x0, y0 ,x, y, x2, y2, r0, r2, t0, t2, r, g, b = this_stroke # x == row, y == col (x is the index in the vertical axis, y is the index in the horizontal axis)
+
+            # Get absolute coordinates in relation to the patch (0 min, 127 max)
+            x_abs_patch = int(math.floor(x.item() * 127)) 
+            y_abs_patch = int(math.floor(y.item() * 127)) 
+
+            x_abs = cap(h_st + x_abs_patch, 0, H)
+            y_abs = cap(w_st + y_abs_patch, 0, W)
+
+            assert x_abs <= H, f"x_abs: {x_abs}, H: {H}"
+            assert y_abs <= W, f"y_abs: {y_abs}, H: {W}"
+
+            x_norm = x_abs / H
+            y_norm = y_abs / W
+
+            middle_coords_strokes.append([(x_abs, y_abs), (x_norm, y_norm)])
+            total_strokes += 1
+
+    return middle_coords_strokes
+
+
+def compute_stroke_distribution(stroke_params, canvas_shape, grid_size):
+    """
+    Compute the distribution of strokes on a discretized canvas.
+    
+    Parameters:
+    - stroke_params: a list of length num_strokes, where each element is [(x_abs, y_abs), (x_norm, y_norm)]
+                     x_abs and y_abs are absolute pixel coordinates,
+                     while x_norm, y_norm are normalized coordinates in the range 0-1.
+    - canvas_shape: a tuple (C, H, W) indicating the shape of the canvas.
+    - grid_size: the size of each grid cell.
+    
+    Returns:
+    - A tensor of shape (H // grid_size, W // grid_size) representing the distribution of strokes on the canvas.
+    """
+    
+    _, H, W = canvas_shape
+    grid_H, grid_W = (H // grid_size)+1, (W // grid_size)+1
+    grid = torch.zeros((grid_H, grid_W))
+    
+    # print(f"General canvas -> H: {H} | W: {W}")
+    # print(f"GRID SHAPE -> {grid.shape}, cell size: {grid_size}")
+    # print(f"grid_H  {grid_H} | grid_W: {grid_W}")
+    
+    # Use the absolute coordinates from stroke_params to map each stroke to a grid cell
+    for stroke in stroke_params:
+        x_abs, y_abs = stroke[0] # x is vertical, and y horizontal 
+        grid_y, grid_x = int(x_abs // grid_size), int(y_abs // grid_size)
+        
+        # print(f"Stroke -> x_abs: {x_abs} | y_abs: {y_abs}")
+        # print(f"grid_y: {grid_y} | grid_x: {grid_x}")
+
+        grid[grid_y, grid_x] += 1
+    
+    grid /= grid.sum()
+    return grid
+
+def plot_stroke_distribution(stroke_params, canvas_shape, grid_size, save_dir, name, level):
+    distribution = compute_stroke_distribution(stroke_params, canvas_shape, grid_size)
+    
+    x_abs_values = [stroke[0][0] for stroke in stroke_params] # vertical 
+    y_abs_values = [stroke[0][1] for stroke in stroke_params] # horizontal 
+    
+    # Creating the histogram (distribution)
+    plt.figure(figsize=(6,6))
+    plt.hist2d(y_abs_values, x_abs_values, bins=(canvas_shape[-2] // grid_size, canvas_shape[-1] // grid_size))
+    plt.colorbar(label="Number of Strokes")
+    plt.xlabel("X-coordinate")
+    plt.ylabel("Y-coordinate")
+    plt.title(f"Distribution of Strokes on {grid_size}x{grid_size} Grid")
+    plt.xlim([0, canvas_shape[2]])
+    plt.ylim([0, canvas_shape[1]])
+    plt.savefig(os.path.join(save_dir, f"stroke_distribution_{name}_lvl_{level}.jpg"))
+    plt.close()
+    
+    # Creating the heatmap
+    plt.figure(figsize=(6,6))
+    plt.imshow(distribution, cmap='hot', interpolation='nearest')
+    plt.colorbar(label="Stroke Density")
+    plt.xlabel("X-coordinate (Grid)")
+    plt.ylabel("Y-coordinate (Grid)")
+    plt.title(f"Heatmap of Strokes on {grid_size}x{grid_size} Grid")
+    plt.savefig(os.path.join(save_dir,f"stroke_heatmap_{name}_{level}.jpg"))
+    plt.close()
+
+    # KDE 2D plot
+    fig, ax = plt.subplots(figsize=(6,6))
+    cax = sns.kdeplot(x=y_abs_values, y=x_abs_values, cmap='crest', fill=True, levels=20) # Blues, RdGy
+    ax.set_xlim(0, canvas_shape[2])
+    ax.set_ylim(canvas_shape[1], 0)
+    plt.xlabel('X Coordinate')
+    plt.ylabel('Y Coordinate')
+    plt.title('2D Kernel Density Estimate of Stroke Distribution')
+    cbar = fig.colorbar(cax.collections[0], ax=ax, orientation="vertical")
+    cbar.set_label('Density')
+    plt.savefig(os.path.join(save_dir, f'kde_distribution_{name}_{level}.jpg'))

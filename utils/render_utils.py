@@ -53,12 +53,12 @@ def texturize(strokes, canvases, brush_size, t, num_params, writer, level,
         # Pad stroke for gif 
         if patches_limits != None:
 
-            H, W = general_canvas.shape[2], general_canvas.shape[3]
-            padded_alpha = utils.pad_crop(alpha, patches_limits, H, W)
-            padded_foreground = utils.pad_crop(alpha, patches_limits, H, W)
-            animation_strokes = [padded_alpha, padded_foreground]
-            all_animation_strokes.append(animation_strokes)
-
+            # H, W = general_canvas.shape[2], general_canvas.shape[3]
+            # padded_alpha = utils.pad_crop(alpha, patches_limits, H, W)
+            # padded_foreground = utils.pad_crop(alpha, patches_limits, H, W)
+            # animation_strokes = [padded_alpha, padded_foreground]
+            # all_animation_strokes.append(animation_strokes)
+            all_animation_strokes.append([foreground, alpha])
 
         # Update canvas patch 
         canvas = canvas * (1 - alpha) + (foreground * alpha)  # [3, 128, 128]
@@ -74,10 +74,10 @@ def texturize(strokes, canvases, brush_size, t, num_params, writer, level,
 
     # print(f'Invalid strokes in level {level}: {invalid_strokes}')
     # print(f'Valid strokes in level {level}: {valid_strokes}')
-    if patches_limits != None:
-        return canvases, foregrounds, alphas, all_animation_strokes
+    # if patches_limits != None:
+    #     return canvases, foregrounds, alphas, all_animation_strokes
         
-    return canvases, foregrounds, alphas
+    return canvases, foregrounds, alphas, all_animation_strokes
 
 
 
@@ -137,7 +137,6 @@ def _forward_pass_snp(stroke, canvas, brush_size, num_params, renderer, idx=None
 
     canvas = canvas * (1 - G_pred_alphas) + (G_pred_foregrounds * G_pred_alphas)
     return canvas, G_pred_foregrounds, G_pred_alphas
-
 
 def blend_general_canvas(canvas, general_canvas, args, patches_limits, npatchesW):
     """
@@ -211,9 +210,10 @@ def blend_general_canvas_natural(canvas, patches_limits, general_canvas, blendin
         w_end = curr_patch_loc[1][1]
 
         # Blends the perimeter of each patch with the general canvas. 
+        ov = 20 # overlap 
         if blendin:
-            ov = 20
             t = torch.linspace(0, 1, steps=ov).to(device)
+            
             # Right side of patch
             patch = (kanvas[:, :, h_st:h_end, w_end-ov:w_end] * t) + \
                     (curr_canvas[:, :, -ov:] * (1 - t))  # [3, 128, 20]

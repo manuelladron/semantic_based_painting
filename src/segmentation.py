@@ -75,10 +75,16 @@ def segment_image(image_path, labels_list, src_img, is_path=True, is_url=False):
 
     category_ids = {}
     for i in range(len(unique_seg_ids)):
+        # Handle edge case problem when segment info is an empty list 
+        if not segment_info:  
+            area = panoptic_seg_id.shape[0] * panoptic_seg_id.shape[1]
+            segment_info = [{'id': 0, 'isthing': False, 'category_id': 184, 'area': area}] # placeholder
+
         assert len(segment_info) == len(unique_seg_ids), "error segmenting this mask"
         category_id = segment_info[i]['category_id']
         category_ids[i] = category_id
-
+    
+    #pdb.set_trace()
     panoptic_seg_cat_ids = map_array(panoptic_seg_id, category_ids) # [H, W]
 
     # Resize 

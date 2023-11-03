@@ -66,6 +66,10 @@ def optimization_loop(args, src_img, opt_steps, target_patches, prev_canvas, str
                 if level == 0:
                     logger.add_image(f'src_img_dec_{level}', img_tensor=source_img_dec.squeeze(), global_step=i)
             
+
+        # if i == (opt_steps - 1): # for gif 
+        #     canvas, canvases_seq, strokes_seq = utils.render(canvas, strokes, budget, brush_size, renderer, num_params, use_transp=use_transp)
+
         # Compute loss and optimize 
         if opt_style == False:
             loss, l1_loss, perc_loss = loss_utils.compute_loss(args, perc_net, canvas, target_patches, use_clip=False)
@@ -216,6 +220,8 @@ def style_transfer_opt(args, src_img, style_img, opt_steps, content_patches, sty
                         brush_size, patches_limits, npatches_w, level, mode, general_canvas, 
                         optimizer, renderer, num_params, logger, use_transp=False):
     """
+    Optimizing strokes 
+    
     :param opt_steps: optimization steps, an integer
     :param prev_canvas: canvas that correspond to the previous layer, a tensor of shape [N,C,H,W]
     :param strokes: stroke parameters to be optimized, a tensor of shape [n_patches, budget, 13]

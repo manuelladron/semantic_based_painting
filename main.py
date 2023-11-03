@@ -8,8 +8,9 @@ from src.painter import Painter
 def create_parser():
     parser = argparse.ArgumentParser(description='Stroke Optimization')
 
-    parser.add_argument('--exp_name', type=str, default = 'exp_204_italy_real') # exp 134, 135 is GOOD! 
-    
+    parser.add_argument('--exp_name', type=str, default = 'exp_244') # exp 134, 135 is GOOD! 
+    parser.add_argument('--style', type=str, default = 'painterly', choices=['realistic', 'painterly']) # exp 134, 135 is GOOD! 
+
     # strategy settings
     parser.add_argument('--brush_type', type=str, default='curved', choices=['straight', 'curved'])
     
@@ -17,32 +18,22 @@ def create_parser():
     parser.add_argument('--global_loss', type=bool, default = False)
     parser.add_argument('--texturize', type=bool, default = True)
     parser.add_argument('--use_transparency', type=bool, default = False)
+
+    parser.add_argument('--compute_stroke_distribution', type=bool, default = True)
     
+    # This is old and probably won't be used again 
     parser.add_argument('--use_segmentation_contours', type=bool, default = False)
-
-    # Segmentation 
-    parser.add_argument('--use_segmentation_mask', type=bool, default = False) # True
-    parser.add_argument('--filter_strokes', type=bool, default = False) # true
-    parser.add_argument('--return_segmented_areas', type=bool, default = False) # true 
-
     parser.add_argument('--use_edges', type=bool, default = False)
 
+    # Don't touch these parameters 
     parser.add_argument('--start_using_masks', type=int, default = 1)
     parser.add_argument('--start_natural_level', type=int, default = 1)
-    parser.add_argument('--patch_strategy_detail', type=str, default='uniform', choices=['uniform', 'natural'])
-
     parser.add_argument('--overlap', type=int, default=20) 
-
-    parser.add_argument('--brush_sizes', type=list, default=[0.7, 0.4, 0.2, 0.05]) # abstracted [0.8, 0.5, 0.2] # realistic [0.8, 0.5, 0.2, 0.05]
-    parser.add_argument('--budgets', type=list, default=[9, 49, 49, 64])  # abstracted [9, 9, 49]   # painterly [9, 16, 16, 9]  # realistic  [9, 9, 49, 64] 
-    parser.add_argument('--iter_steps', type=list, default=[300, 300, 300, 300]) # [300, 300, 300]
-
-    parser.add_argument('--number_natural_patches', type=int, default=[40, 60, 60])  # [25, 30, 25] # [30, 50, 60] # painterly [25, 30, 60]
 
     # misc settings 
     parser.add_argument('--upsample', type=bool, default = True)
     parser.add_argument('--aspect_ratio_downsample', type=float, default=3)
-    parser.add_argument('--image_path', type=str, default = '/home/manuelladron/projects/npp/stroke_opt_main/images/streets/italy.jpeg') 
+    parser.add_argument('--image_path', type=str, default = '/home/manuelladron/projects/npp/stroke_opt_main/images/aw/onemushroom.jpeg') 
     
     parser.add_argument('--save_dir', type=str, default = '/home/manuelladron/projects/npp/stroke_opt_main/stroke_opt_23/results')
     parser.add_argument('--canvas_size', type=int, default=128)
@@ -50,7 +41,7 @@ def create_parser():
 
     # Renderer settings 
     parser.add_argument('--renderer_ckpt_path', type=str, default = './model_checkpoints/renderer.pkl')
-    parser.add_argument('--renderer_ckpt_path_straight', type=str, default = '/home/manuelladron/projects/npp/diff_renderer/results/checkpoints_straight_brush/renderer_250.pkl')
+    parser.add_argument('--renderer_ckpt_path_straight', type=str, default = '/home/manuelladron/projects/npp/stroke_opt_main/images/aw/harlequim_shrimp.jpg')
 
     # optimization settings 
     parser.add_argument('--lr', type=float, default = 0.004)
@@ -61,26 +52,60 @@ def create_parser():
     # loss settings 
     parser.add_argument('--w_perc', type=float, default = 0)
 
-    # Clip loss settings 
+    # Clip Text-Style Optimization loss settings 
     parser.add_argument('--add_style', type=bool, default=False)
     parser.add_argument('--opt_steps_style', type=int, default=500) # exp_17 -> 350
-
     parser.add_argument('--style_prompt', type=str, default = 'Starry Night by Vincent Van Gogh')
-    
     parser.add_argument('--style_lambda', type=float, default=900)
     parser.add_argument('--content_lambda', type=float, default=10)
     parser.add_argument('--style_patch_lambda', type=float, default=1000)
 
-    # Style Transfer
+    # Style Transfer (Image-style optimization)
     parser.add_argument('--style_transfer', type=bool, default=False)
-    parser.add_argument('--st_content_w', type=float, default=0.01) # 0.01 works relatively well, 0.001 works well but produces patches 
-    parser.add_argument('--style_img_path', type=str, default = '/home/manuelladron/projects/npp/stroke_opt_main/images/style/goya2.jpeg')
+    parser.add_argument('--st_content_w', type=float, default=0.005) # 0.01 works relatively well, 0.001 works well but produces patches 
+    parser.add_argument('--style_img_path', type=str, default = '/home/manuelladron/projects/npp/stroke_opt_main/images/style/minotaur.jpg')
 
     return parser 
+
+
+def define_styles(style, args):
+    """
+    Defines style parameters based on desired style input
+    :style: string, either painterly or realistic 
+    :args: parsed args 
+    """
+    args.brush_sizes = [0.7, 0.4, 0.2, 0.05] # Same for every style
+    args.iter_steps = [300, 300, 300, 300] 
+    
+    # Realism 
+    if style == 'realistic':
+        args.budgets=[9, 49, 64, 81]  # abstracted [9, 9, 49]   # painterly [9, 16, 16, 9]  # realistic  [9, 9, 49, 64] # hyperrealistic [9,49,64,81]
+        args.number_natural_patches = [40, 60, 60]
+        args.patch_strategy_detail = 'uniform'
+        args.use_segmentation_mask = False
+        args.filter_strokes = False
+        args.return_segmented_areas = False
+   
+    # Painterly 
+    else:
+        args.budgets=[9, 16, 16, 9]
+        args.number_natural_patches = [25, 30, 60]
+        args.patch_strategy_detail = 'natural'
+        args.use_segmentation_mask = True
+        args.filter_strokes = True
+        args.return_segmented_areas = True
+
+    return args
+
 
 if __name__ == '__main__':
     args = create_parser().parse_args()
     
+    # Define style 
+    args = define_styles(args.style, args)
+
+    print(f'------Style: {args.style}--------')
+
     basename = os.path.basename(args.image_path).split(".")[0]
     usemask = str(args.use_segmentation_mask)
     mode = str(args.patch_strategy_detail)
