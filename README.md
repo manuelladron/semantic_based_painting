@@ -5,7 +5,7 @@ This repository contains a semantic-based painting optimization algorithm which 
 
 ![Reference Image 1](media_readme/teaser_img.png)
 
-![Reference Image 2](media_readme/giraffe_1.gif)
+<!-- ![Reference Image 2](media_readme/giraffe_1.gif) -->
 
 <!-- ![Reference Image 2](media_readme/dinner_dog_process_text_mask_person_lvl_3.jpg) -->
 
@@ -84,7 +84,7 @@ The method uses various techniques and algorithms to produce a painting from an 
 
 ## More Results:
 
-![Reference Image 3](media_readme/motorcycle_0.gif)
+<!-- ![Reference Image 3](media_readme/motorcycle_0.gif) -->
 
 ![Reference Image 4](media_readme/onemushroom_texture_lvl_0.jpg)
 
