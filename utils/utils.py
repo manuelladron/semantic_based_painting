@@ -190,7 +190,6 @@ def process_img(args, img_path, writer, style_img_path=None, resize_value=128, m
     if style_img_path != None:
         style_img = cv2.imread(style_img_path, cv2.IMREAD_COLOR)[:,:,::-1] # from BGR to RGB uint8 [H,W,3]
 
-
     # If passing a resizing value 
     if resize_value != None:
         src_img = cv2.resize(src_img, (resize_value, resize_value)) # [0-255]

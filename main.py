@@ -8,7 +8,7 @@ from src.painter import Painter
 def create_parser():
     parser = argparse.ArgumentParser(description='Stroke Optimization')
 
-    parser.add_argument('--exp_name', type=str, default = 'exp_300')  # exp 134, 135 is GOOD! 
+    parser.add_argument('--exp_name', type=str, default = 'exp_301')  # exp 134, 135 is GOOD! 
     parser.add_argument('--style', type=str, default = 'painterly', choices=['realistic', 'painterly', 'abstract', 'expressionist']) # exp 134, 135 is GOOD! 
 
     # strategy settings
@@ -64,7 +64,7 @@ def create_parser():
     # Style Transfer (Image-style optimization)
     parser.add_argument('--style_transfer', type=bool, default=False)
     parser.add_argument('--st_content_w', type=float, default=0.005) # 0.01 works relatively well, 0.001 works well but produces patches 
-    parser.add_argument('--style_img_path', type=str, default = '')
+    parser.add_argument('--style_img_path', type=str, default = None)
 
     return parser 
 

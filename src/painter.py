@@ -86,6 +86,7 @@ class Painter():
                                                                                                             resize_value=None, 
                                                                                                             style_img_path=self.args.style_img_path) # torch tensor [1, 3, H, W] #
 
+        
         """
         Shapes from utils.process_img function 
         
@@ -176,8 +177,10 @@ class Painter():
 
             print(f'Total patches collected: {len(self.patches_limits)}')
             print(f'Patches height: {npatches_h}, patches width: {npatches_w}')
-
-        return src_img.to(device), canvas, mask, style_img.to(device)
+        if style_img == None:
+            return src_img.to(device), canvas, mask, None
+        else:
+            return src_img.to(device), canvas, mask, style_img.to(device)
 
     def compute_loss(self, canvas, target_patches, use_clip=False):
         """
