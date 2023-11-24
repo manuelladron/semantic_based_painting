@@ -19,6 +19,8 @@ from torchvision.utils import save_image
 import matplotlib.pyplot as plt
 import seaborn as sns
 import math 
+from scipy.integrate import quad
+from scipy.interpolate import interp1d
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") # 
 
@@ -642,7 +644,7 @@ def high_error_candidates(canvas, patches_list, patches_loc_list, level, num_pat
     #     pdb.set_trace()
     return selected_patches_loc, selected_patches_img, indices, values
 
-def get_natural_patches(number_uniform_patches, source_img, general_canvas, logger, level, mask, K_number_natural_patches, path=None, name=''):
+def get_natural_patches(number_uniform_patches, source_img, general_canvas, general_canvas_txt, logger, level, mask, K_number_natural_patches, path=None, name=''):
     """
     ****** Visual working memory in the paper *******
 
@@ -693,7 +695,7 @@ def get_natural_patches(number_uniform_patches, source_img, general_canvas, logg
         mask_patches = crop_image(patches_limits, mask, return_tensor=True).to(device)
 
     # Log boxes in canvas and source image  
-    draw_bboxes(general_canvas, patches_limits, level, logger, name, canvas=True, path=path)
+    draw_bboxes(general_canvas_txt, patches_limits, level, logger, name, canvas=True, path=path)
     draw_bboxes(source_img, patches_limits, level, logger, name, canvas=False, path=path)   # [npatches, 3, 128,128]
     
     return target_patches, patches_limits, indices, values, mask_patches 
@@ -1227,7 +1229,7 @@ def create_gif(input_dir, output_file, fps=30):
 def cap(value, min_value, max_value):
     return max(min_value, min(value, max_value))
 
-def get_absolute_stroke_coordinates(strokes, patches_limits, general_canvas):
+def get_absolute_stroke_coordinates(strokes, patches_limits, general_canvas, ongoing_number_strokes):
     """
     Gets strokes parameters and returns a list of strokes with absolute and normalized coordinates in relation to the overall canvas
 
@@ -1243,6 +1245,7 @@ def get_absolute_stroke_coordinates(strokes, patches_limits, general_canvas):
     H, W = general_canvas.shape[2], general_canvas.shape[3]
     
     middle_coords_strokes = []
+    areas = []
 
     total_strokes = 0
     for i in range(len(patches_limits)): # patches_limits are in absolute pixels 
@@ -1254,6 +1257,7 @@ def get_absolute_stroke_coordinates(strokes, patches_limits, general_canvas):
 
         for j in range(strokes.shape[0]): # each stroke individually
             this_stroke = strokes[j, i] # 13-tuple
+            
             x0, y0 ,x, y, x2, y2, r0, r2, t0, t2, r, g, b = this_stroke # x == row, y == col (x is the index in the vertical axis, y is the index in the horizontal axis)
 
             # Get absolute coordinates in relation to the patch (0 min, 127 max)
@@ -1269,10 +1273,16 @@ def get_absolute_stroke_coordinates(strokes, patches_limits, general_canvas):
             x_norm = x_abs / H
             y_norm = y_abs / W
 
+            area = bezier_area(x0.item(), y0.item(), x.item(), y.item(), x2.item(), y2.item(), r0.item(), r2.item())
+            areas.append(area)
+            
+            #print(f'area: {area}')
+
             middle_coords_strokes.append([(x_abs, y_abs), (x_norm, y_norm)])
             total_strokes += 1
 
-    return middle_coords_strokes
+    ongoing_number_strokes += total_strokes
+    return middle_coords_strokes, areas, ongoing_number_strokes
 
 
 def compute_stroke_distribution(stroke_params, canvas_shape, grid_size):
@@ -1311,21 +1321,24 @@ def compute_stroke_distribution(stroke_params, canvas_shape, grid_size):
     grid /= grid.sum()
     return grid
 
-def plot_stroke_distribution(stroke_params, canvas_shape, grid_size, save_dir, name, level):
+def plot_stroke_distribution(stroke_params, areas, canvas_shape, grid_size, save_dir, name, level, number_strokes):
     distribution = compute_stroke_distribution(stroke_params, canvas_shape, grid_size)
     
     x_abs_values = [stroke[0][0] for stroke in stroke_params] # vertical 
     y_abs_values = [stroke[0][1] for stroke in stroke_params] # horizontal 
     
+    strokes_seq = list(range(len(areas)))
+
     # Creating the histogram (distribution)
     plt.figure(figsize=(6,6))
     plt.hist2d(y_abs_values, x_abs_values, bins=(canvas_shape[-2] // grid_size, canvas_shape[-1] // grid_size))
+    #plt.gca().invert_yaxis()
     plt.colorbar(label="Number of Strokes")
     plt.xlabel("X-coordinate")
     plt.ylabel("Y-coordinate")
     plt.title(f"Distribution of Strokes on {grid_size}x{grid_size} Grid")
-    plt.xlim([0, canvas_shape[2]])
-    plt.ylim([0, canvas_shape[1]])
+    plt.xlim(0, canvas_shape[2])
+    plt.ylim(canvas_shape[1], 0)
     plt.savefig(os.path.join(save_dir, f"stroke_distribution_{name}_lvl_{level}.jpg"))
     plt.close()
     
@@ -1350,3 +1363,98 @@ def plot_stroke_distribution(stroke_params, canvas_shape, grid_size, save_dir, n
     cbar = fig.colorbar(cax.collections[0], ax=ax, orientation="vertical")
     cbar.set_label('Density')
     plt.savefig(os.path.join(save_dir, f'kde_distribution_{name}_{level}.jpg'))
+
+    # Stroke size by sequence 
+    canvas_size=128*128
+    normalized_areas_canvas = [(area / canvas_size) * 100 for area in areas]  # multiplied by 100 for percentage
+
+    plt.figure(figsize=(6, 6))
+    plt.plot(strokes_seq, normalized_areas_canvas, '-o' , alpha=0.6) # '-o' creates a line graph with circle markers
+    plt.title('Stroke Size by Sequence')
+    plt.xlabel('Sequence')
+    plt.ylabel('Stroke Size (Area)')
+    plt.grid(True)
+    plt.savefig(os.path.join(save_dir, f'stroke_size_seq_{name}_{level}.jpg'))
+
+    # Stroke size by location 
+    # Normalize area values for coloring
+    norm_areas = [(area - min(areas)) / (max(areas) - min(areas)) for area in areas]
+
+    plt.figure(figsize=(6, 6))
+    plt.scatter(y_abs_values, x_abs_values, c=norm_areas, cmap='viridis', alpha=0.6)
+    plt.gca().invert_yaxis()
+    plt.colorbar(label='Normalized Stroke Size (Area)')
+    plt.title('Stroke Size by Location')
+    plt.xlabel('X Coordinate')
+    plt.ylabel('Y Coordinate')
+    plt.grid(True)
+    plt.xlim(0, canvas_shape[2])
+    plt.ylim(canvas_shape[1], 0)
+    plt.savefig(os.path.join(save_dir, f'stroke_size_loc_{name}_{level}.jpg'))
+
+
+    # Define bins for the histogram, note that these are the edges so >0.8 is implied by bin edge 0.8 to 1.0
+    bins = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+    relative_areas = [(area / canvas_size) for area in areas] 
+    total_strokes = len(relative_areas)
+
+    # Calculate the histogram data
+    counts, _ = np.histogram(relative_areas, bins=bins)
+    percentages = (counts / sum(counts)) * 100
+
+    plt.figure(figsize=(6, 6))
+    # Create the histogram
+    #plt.hist(relative_areas, bins=bins, color='mediumpurple', edgecolor='black')
+
+    # Create labels for each bin
+    bin_labels = ['<20%', '20-40%', '40-60%', '60-80%', '>80%']
+    bin_centers = [(a + b) / 2 for a, b in zip(bins[:-1], bins[1:])]
+
+    plt.bar(bin_centers, percentages, color='mediumpurple', edgecolor='black', width=0.1)
+    plt.xticks(bin_centers, bin_labels)
+
+    # Adding labels and title
+    plt.title('Distribution of Stroke Sizes Relative to Canvas Area')
+    plt.xlabel('Percentage of Canvas Area Covered')
+    plt.ylabel('Number of Strokes')
+    plt.savefig(os.path.join(save_dir,f"stroke_rel_area_{name}_{level}.jpg"))
+    plt.close()
+
+
+
+
+
+
+def bezier_point(t, p0, p1, p2):
+    """Calculate a point in a quadratic Bezier curve."""
+    return (1-t)**2 * p0 + 2*(1-t)*t * p1 + t**2 * p2
+
+def radius_at_t(t, r0, r2):
+    """Linearly interpolate the radius along the curve."""
+    return (1 - t) * r0 + t * r2
+
+def bezier_area(x0, y0, x, y, x2, y2, r0, r2, patch_size=128, num_segments=1000):
+    """Approximate the area under a Bezier curve with varying radius."""
+
+    # Scale the normalized parameters to the patch size
+    x0, y0, x, y, x2, y2 = [coord * patch_size for coord in [x0, y0, x, y, x2, y2]]
+    r0, r2 = r0 * patch_size, r2 * patch_size
+
+    # Define the Bezier points
+    # p0 = np.array([x0, y0])
+    # p1 = np.array([x, y])
+    # p2 = np.array([x2, y2])
+
+    # Discretize the curve
+    t_values = np.linspace(0, 1, num_segments)
+    #bezier_points = np.array([bezier_point(t, p0, p1, p2) for t in t_values])
+    radii = np.array([radius_at_t(t, r0, r2) for t in t_values])
+
+    # Calculate the area under the curve by summing the areas of circles
+    # with radii interpolated along the curve
+    # (this is an approximation)
+    circle_areas = np.pi * radii**2
+    total_area = np.trapz(circle_areas, t_values)  # more accurate than summing 
+    #total_area = np.sum(areas) * (1 / num_segments)
+
+    return total_area

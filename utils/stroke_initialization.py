@@ -97,16 +97,23 @@ def create_grid_strokes(budget, num_params, patch, device, std = 0.2):
     # for curved strokes 
     if num_params == 13:
         # Other parameters: radius, transparency and rgb 
-        rad = torch.rand(budget, 2, requires_grad=True, device=device)
-        transp = torch.ones(budget, 2, requires_grad=True, device=device)
+        rad = torch.rand(budget, 2, requires_grad=True, device=device)    # [budget, 2]
+        transp = torch.ones(budget, 2, requires_grad=True, device=device) # [budget, 2]
         #rgb = torch.rand(budget, 3, requires_grad=True, device=device)
 
         # Convert patch to a color palette 
         #palette = [(205,180,219),(255, 200, 221),(255, 175, 204),(189, 224, 254),(162, 210, 255)]
         #patch = color_palette_replace(patch, palette)
-
-        rgb = (torch.ones(budget, 3, requires_grad=True, device=device) * (patch[:, (x*128).squeeze().long(), (y*128).squeeze().long()]).permute(1,0)).float()
-
+        
+        # print('x', x.shape) # [budget, 1]
+        # print('y', y.shape) # [budget, 1]
+        # print('x_trans', (x*128).squeeze().long().shape)
+        # print('patch: ', patch[:, (x*128).squeeze().long(), (y*128).squeeze().long()].shape)
+        
+        #pdb.set_trace()
+        rgb = (torch.ones(budget, 3, requires_grad=True, device=device) * (patch[:, (x*128).squeeze().long(), (y*128).squeeze().long()]).permute(1,0)).float() # [budget, 3]
+        #print('rgb shape: ', rgb.shape)
+        #pdb.set_trace()
         # Put them together 
         strokes = torch.cat([x0, y0, x, y, x2,y2, rad, transp, rgb], dim=1).requires_grad_()
 

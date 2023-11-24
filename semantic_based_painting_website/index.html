@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="description"
+        content="Semantic-Based Parametric Painting.">
+  <meta name="keywords" content="SBR, Parametric-Painting, Optimization">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nerfies: Deformable Neural Radiance Fields</title>
+
+  <!-- Global site tag (gtag.js) - Google Analytics -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-PYVRSFMDRL"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+
+    function gtag() {
+      dataLayer.push(arguments);
+    }
+
+    gtag('js', new Date());
+
+    gtag('config', 'G-PYVRSFMDRL');
+  </script>
+
+  <link href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans|Castoro"
+        rel="stylesheet">
+
+  <link rel="stylesheet" href="./static/css/bulma.min.css">
+  <link rel="stylesheet" href="./static/css/bulma-carousel.min.css">
+  <link rel="stylesheet" href="./static/css/bulma-slider.min.css">
+  <link rel="stylesheet" href="./static/css/fontawesome.all.min.css">
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
+  <link rel="stylesheet" href="./static/css/index.css">
+  <link rel="icon" href="./static/images/favicon.svg">
+
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+  <script defer src="./static/js/fontawesome.all.min.js"></script>
+  <script src="./static/js/bulma-carousel.min.js"></script>
+  <script src="./static/js/bulma-slider.min.js"></script>
+  <script src="./static/js/index.js"></script>
+
+  <!-- Include MathJax -->
+  <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+  <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+
+<nav class="navbar" role="navigation" aria-label="main navigation">
+  <div class="navbar-brand">
+    <a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false">
+      <span aria-hidden="true"></span>
+      <span aria-hidden="true"></span>
+      <span aria-hidden="true"></span>
+    </a>
+  </div>
+  <div class="navbar-menu">
+    <div class="navbar-start" style="flex-grow: 1; justify-content: center;">
+      <a class="navbar-item" href="https://manuelladron.github.io">
+      <span class="icon">
+          <i class="fas fa-home"></i>
+      </span>
+      </a>
+
+      <div class="navbar-item has-dropdown is-hoverable">
+        <a class="navbar-link">
+          More Research
+        </a>
+        <div class="navbar-dropdown">
+          <a class="navbar-item" href="https://github.com/manuelladron">
+            Author's Github
+          </a>
+          <a class="navbar-item" href="https://scholar.google.com/citations?view_op=list_works&hl=en&hl=en&user=yP_0YCsAAAAJ">
+            Scholar
+          </a>
+
+        </div>
+      </div>
+    </div>
+
+  </div>
+</nav>
+
+
+<section class="hero">
+  <div class="hero-body">
+    <div class="container is-max-desktop">
+      <div class="columns is-centered">
+        <div class="column has-text-centered">
+          <h1 class="title is-1 publication-title">Semantic-Based Parametric Painting</h1>
+          <div class="is-size-5 publication-authors">
+            <span class="author-block">
+              <a href="https://manuelladron.github.io/">Manuel Ladron de Guevara</a><sup>1</sup>,</span>
+            <span class="author-block">
+              <a href="https://research.adobe.com/person/matt-fisher/">Matt Fisher</a><sup>2</sup>,</span>
+            <span class="author-block">
+              <a href="https://www.dgp.toronto.edu/~hertzman/">Aaron Hertzmann</a><sup>2</sup>,
+            </span>
+          </div>
+
+          <div class="is-size-5 publication-authors">
+            <span class="author-block"><sup>1</sup>Carnegie Mellon University,</span>
+            <span class="author-block"><sup>2</sup>Adobe Research</span>
+          </div>
+
+          <div class="column has-text-centered">
+            <div class="publication-links">
+              <!-- PDF Link. -->
+              <span class="link-block">
+                <a href="https://arxiv.org/pdf/2011.12948"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="fas fa-file-pdf"></i>
+                  </span>
+                  <span>Paper</span>
+                </a>
+              </span>
+              <span class="link-block">
+                <a href="https://arxiv.org/abs/2011.12948"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="ai ai-arxiv"></i>
+                  </span>
+                  <span>arXiv</span>
+                </a>
+              </span>
+              <!-- Code Link. -->
+              <span class="link-block">
+                <a href="https://github.com/manuelladron/semantic_based_painting"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="fab fa-github"></i>
+                  </span>
+                  <span>Code</span>
+                  </a>
+              </span>
+                  </a>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="hero teaser">
+  <div class="container is-max-desktop">
+    <div class="hero-body">
+      <img id="teaser" src="./static/images/website_teaser.png" alt='testing' style="width: 100%";>
+
+    </img>
+      <h2 class="subtitle has-text-centered">
+        Our method turns images into paitings of different styles. Abstract expressionist (left), painterly (right). We achieve a higher control than existing methods through the use of segmentation and dynamic attention maps.
+      </h2>
+    </div>
+  </div>
+</section>
+
+
+<section class="hero is-light is-small">
+  <div class="hero-body">
+    <div class="container">
+      <!-- Replace carousel with a two-column layout for GIFs -->
+      <div class="columns">
+        <!-- First GIF -->
+        <div class="column">
+          <img src="./static/gifs/giraffe_1.gif" alt="" style="width: 100%;">
+        </div>
+
+        <!-- Second GIF -->
+        <div class="column">
+          <img src="./static/gifs/motorcycle_0.gif" alt="" style="width: 100%;">
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<section class="section">
+  <div class="container is-max-desktop">
+   
+    <!-- Abstract. -->
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3">Abstract</h2>
+        <div class="content has-text-justified">
+          <p>
+            We introduce a novel image-to-painting method that facilitates the creation of large-scale, high-fidelity paintings with human-like quality and stylistic variation.
+            To process large images and gain control over the painting process, we introduce a segmentation-based painting process and a dynamic attention map approach inspired by human painting strategies, allowing optimization of brush strokes to proceed in batches over different image regions, thereby capturing both large-scale structure and fine details, while also allowing stylistic control over detail.
+            Our optimized batch processing and patch-based loss framework enable efficient handling of large canvases, ensuring our painted outputs are both aesthetically compelling and functionally superior as compared to previous methods, as confirmed by rigorous evaluations. 
+          </p>
+        </div>
+        <!-- Image -->
+        <div>
+          <img src="./static/images/supp_teaser.png" alt="" style="width: 100%;">
+        </div>
+      </div>
+    </div>
+    <!--/ Abstract. -->
+
+  </div>
+</section>
+
+
+<section class="section">
+  <div class="container is-max-desktop">
+   
+    <!-- How does it work -->
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3">How does it work?</h2>
+        <!-- Paragraph -->
+        <div class="content has-text-justified">
+          <p>
+            Our goal is to efficiently optimize a collection of stroke parameters that define a large-scale painting from a given image, capturing micro and macro structures with high fidelity, and providing control for stylistic variation. Our system takes as input an image \(X\), and style parameters, encapsulated by three style presets: "realistic," "painterly," and "abstraction." Then, our objective is to optimize a parameter vector \(\bar{Y}\) of strokes, which, when rendered on a canvas \(C\), will approximate the given image \(X\) as a stylized painting. Our scalable solution accommodates varying sizes and aspect ratios through batch-patch optimization, cropping the input and canvas into a set of \(128 \times 128\) patches, which are reassembled after the optimization process to match the original image scale.
+          </p>
+        </div>
+        <!-- Image -->
+        <div>
+          <img src="./static/images/overall_method_v3.pdf" alt="" style="width: 100%;">
+        </div>
+        <!-- Paragraphs -->
+        <div class="content has-text-justified">
+          <p>
+            Inspired by human painting techniques, and to provide more control over the painting process, we first use a segmentation network that decomposes the painting into semantic areas, and then employ dynamic attention maps to determine where to paint.
+          </p>
+          <p>
+            Our innovative painting method uses a layered approach to create art. Each layer corresponds to different parts of the image, allowing for unique styles and details in each area. 
+          </p>
+        </div>
+        <!-- Image -->
+        <div>
+          <img src="./static/images/painting_analysis.png" alt="" style="width: 100%;">
+        </div>
+        <!-- Paragraphs -->
+        <div class="content has-text-justified">
+        <p>
+          We start with broad strokes and gradually add finer details, mimicking the process of a traditional artist. This step-by-step approach helps us craft a painting that combines both large-scale structure and intricate elements.
+        </p>
+        <p>
+          The essence of our technique lies in focusing on specific areas of the painting in each step. We use dynamic attention maps to guide this process, which either uniformly covers the whole image or focuses on areas needing more work. This strategy ensures that every part of the painting gets the right amount of detail, making our paintings strikingly realistic and artistically expressive.
+        </p>
+      </div>
+
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section class="hero is-light is-small">
+  <div class="hero-body">
+    <div class="container">
+      
+      <!-- Paper images. -->
+      <div id="results-carousel" class="carousel results-carousel">
+      
+        <div class="item item-2">
+          <img src="./static/images/supp2.png" alt="" style="width: 100%;">
+        </div>
+
+        <div class="item item-3">
+          <img src="./static/images/supp3.png" alt="" style="width: 100%;">
+        </div>
+
+        <div class="item item-4">
+          <img src="./static/images/supp8.png" alt="" style="width: 100%;">
+        </div>
+    </div>
+      
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<section class="section" id="BibTeX">
+  <div class="container is-max-desktop content">
+    <h2 class="title">BibTeX</h2>
+    <pre><code>@article{ladrondeguevara2023semantic,
+  author    = {Ladron de Guevara, Manuel and Fisher, Matthew and Hertzmann, Aaron},
+  title     = {Segmentation-Based Parametric Painting},
+  year      = {2023},
+}</code></pre>
+  </div>
+</section>
+
+
+<footer class="footer">
+  <div class="container">
+    <div class="content has-text-centered">
+      <a class="icon-link"
+         href="./static/paper/semantic_painting.pdf">
+        <i class="fas fa-file-pdf"></i>
+      </a>
+      <a class="icon-link" href="https://github.com/manuelladron" class="external-link" disabled>
+        <i class="fab fa-github"></i>
+      </a>
+    </div>
+    <div class="columns is-centered">
+      <div class="column is-8">
+        <div class="content">
+          <p>
+            This website is licensed under a <a rel="license"
+                                                href="http://creativecommons.org/licenses/by-sa/4.0/">Creative
+            Commons Attribution-ShareAlike 4.0 International License</a>.
+          </p>
+          <p>
+            Website source code based on the <a
+              href="https://nerfies.github.io/">Nerfies</a> project page.
+              If you want to reuse their <a href="https://github.com/nerfies/nerfies.github.io">source code</a> please credit them appropriately.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
