@@ -1,14 +1,13 @@
-# Nerfies
+# Semantic-Based Segmentation Painting
 
-This is the repository that contains source code for the [Nerfies website](https://nerfies.github.io).
+This is the repository that contains source code for the [Semantic-Based Segmentation Painting Website](https://manuelladron.github.io/semantic_based_painting/).
 
-If you find Nerfies useful for your work please cite:
+If you find Semantic-Based Segmentation Painting useful for your work please cite:
 ```
-@article{park2021nerfies
-  author    = {Park, Keunhong and Sinha, Utkarsh and Barron, Jonathan T. and Bouaziz, Sofien and Goldman, Dan B and Seitz, Steven M. and Martin-Brualla, Ricardo},
-  title     = {Nerfies: Deformable Neural Radiance Fields},
-  journal   = {ICCV},
-  year      = {2021},
+@article{ladrondeguevara2023semantic,
+  author    = {Ladron de Guevara, Manuel and Fisher, Matthew and Hertzmann, Aaron},
+  title     = {Segmentation-Based Parametric Painting},
+  year      = {2023},
 }
 ```
 
