@@ -178,23 +178,32 @@
 </section>
 
 
-<section class="hero is-light is-small">
-  <div class="hero-body">
-    <div class="container">
-      <div class = 'gif-row'>
-      <!-- Replace carousel with a two-column layout for GIFs -->
-      <!-- <div class="columns"> -->
-        <!-- First GIF -->
-        <div class="gif-container">
-          <img src="./static/gifs/giraffe_1.gif" alt="giraffe">
-        </div>
 
-        <!-- Second GIF -->
-        <div class="gif-container">
-          <img src="./static/gifs/motorcycle_0.gif" alt="vespa">
+
+
+<section class="hero is-light is-small">
+  <div class="container is-max-desktop">
+    <div class="columns is-centered">
+
+      <!-- Visual Effects. -->
+      <div class="column">
+        <div class="content">
+      <video id="teaser" autoplay muted loop playsinline height="100%">
+        <source src="./static/videos/giraffe.mp4"
+                type="video/mp4">
+      </video>
+      </div> 
+      </div>
+
+      <div class="column">
+        <div class="content">
+      <video id="teaser" autoplay muted loop playsinline height="100%">
+        <source src="./static/videos/vespa.mp4"
+                type="video/mp4">
+      </video>
         </div>
       </div>
-      </div>
+
     </div>
   </div>
 </section>
