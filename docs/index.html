@@ -8,6 +8,25 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Semantic-Based Parametric Painting</title>
 
+  <style>
+    .gif-row {
+      display: flex; /* Enable flex container */
+      justify-content: center; /* Center items horizontally */
+      align-items: center; /* Center items vertically */
+    }
+    .gif-container {
+      flex: 1; /* Each container takes equal width */
+      min-height: 100px; /* Adjust as necessary */
+      margin: 10px; /* Optional: Adds some space between the GIFs */
+    }
+    .gif-container img {
+      width: 100%;
+      height: auto; /* Maintain aspect ratio */
+    }
+  </style>
+
+
+
   <!-- Global site tag (gtag.js) - Google Analytics -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-PYVRSFMDRL"></script>
   <script>
@@ -162,17 +181,19 @@
 <section class="hero is-light is-small">
   <div class="hero-body">
     <div class="container">
+      <div class = 'gif-row'>
       <!-- Replace carousel with a two-column layout for GIFs -->
-      <div class="columns">
+      <!-- <div class="columns"> -->
         <!-- First GIF -->
-        <div>
-          <img src="./static/gifs/giraffe_1.gif" alt="" style="width: 100%;">
+        <div class="gif-container">
+          <img src="./static/gifs/giraffe_1.gif" alt="giraffe">
         </div>
 
         <!-- Second GIF -->
-        <div>
-          <img src="./static/gifs/motorcycle_0.gif" alt="" style="width: 100%;">
+        <div class="gif-container">
+          <img src="./static/gifs/motorcycle_0.gif" alt="vespa">
         </div>
+      </div>
       </div>
     </div>
   </div>
