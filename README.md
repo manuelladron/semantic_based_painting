@@ -2,6 +2,10 @@
 
 This repository contains a semantic-based painting optimization algorithm which aims to transform a given input image into a painting. The algorithm takes advantage of modern computer vision techniques, segmentation networks, and a differentiable renderer to generate results.
 
+[Project Website](https://manuelladron.github.io/semantic_based_painting/)
+
+
+
 
 ![Reference Image 1](media_readme/teaser_img.png)
 
