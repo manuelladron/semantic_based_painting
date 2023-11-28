@@ -1,19 +1,22 @@
-# Segmentation-Based Parametric Painting
+## :smiley::heart_eyes::fire::fire: Segmentation-Based Parametric Painting :fire::fire::heart_eyes::smiley:
 
 This repository contains a semantic-based painting optimization algorithm which aims to transform a given input image into a painting. The algorithm takes advantage of modern computer vision techniques, segmentation networks, and a differentiable renderer to generate results.
 
 [Project Website](https://manuelladron.github.io/semantic_based_painting/)
 
+![Reference Image 1](media_readme/paris2_expressionist.jpg)
+
+![Reference Image 2](media_readme/teaser_img.png)
+
+![Reference Image 3](media_readme/giraffe_1.gif)
 
 
-
-![Reference Image 1](media_readme/teaser_img.png)
-
-![Reference Image 2](media_readme/giraffe_1.gif)
 
 <!-- ![Reference Image 2](media_readme/dinner_dog_process_text_mask_person_lvl_3.jpg) -->
 
 ## What It Does
+
+![Reference Image 4](media_readme/thesis_chp_teaser.png)
 
 The algorithm aims to efficiently optimize a collection of stroke parameters to create a painting from a given image input. The method starts with an image and optimizes a parameter vector of strokes. When rendered on a canvas, it recreates the input image in the form of a painting. The approach is designed to efficiently manage any input size or aspect ratio. It divides the canvas into semantic areas using a segmentation network. This provides a higher control over the painting compared to previous optimization and neural methods.
 
@@ -43,9 +46,14 @@ The algorithm aims to efficiently optimize a collection of stroke parameters to 
 
 ### 1. Requirements:
 
-- Python 3
-- Necessary libraries and dependencies (refer to `requirements.txt` if provided).
-- Download the renderer and perceptual network [here](https://drive.google.com/drive/folders/1f1dMbU5Yj9T-lGq0ZTc1MPPPJ-R7v0YX?usp=sharing) and store them in a folder under the main directory.
+- Python 3.6 or later
+- Install the required packages from `requirements.txt` using the following command:
+
+```bash
+pip install -r requirements.txt
+```
+
+- Download the renderer and perceptual network [here](https://drive.google.com/drive/folders/1f1dMbU5Yj9T-lGq0ZTc1MPPPJ-R7v0YX?usp=sharing) and store them in a folder under the main directory. *Update: also provided in folder model_checkpoints.
 
 ### 2. Command:
 
@@ -88,18 +96,29 @@ The method uses various techniques and algorithms to produce a painting from an 
 
 ## More Results:
 
-![Reference Image 3](media_readme/motorcycle_0.gif)
+![Reference Image 5](media_readme/motorcycle_0.gif)
 
-![Reference Image 4](media_readme/onemushroom_texture_lvl_0.jpg)
+![Reference Image 6](media_readme/onemushroom_texture_lvl_0.jpg)
 
-![Reference Image 5](media_readme/painterly_vs_realistic_middle.png)
+![Reference Image 7](media_readme/painterly_vs_realistic_middle.png)
 
-## References:
+## References
 
 - [Huang, et al. 2019. Learning to Paint]
 - [Liu et al. 2021. Paint Transformer]
+- [Zou et al. 2020. Stylized Neural Painting]
 - [DETR: Carion, et al. 2020. End-to-End Object Detection with Transformers]
 
+## Citation
+
+@misc{deguevara2023segmentationbased,
+      title={Segmentation-Based Parametric Painting}, 
+      author={Manuel Ladron de Guevara and Matthew Fisher and Aaron Hertzmann},
+      year={2023},
+      eprint={2311.14271},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      }
 
 ## Feedback
 
