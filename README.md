@@ -110,7 +110,7 @@ The method uses various techniques and algorithms to produce a painting from an 
 - [DETR: Carion, et al. 2020. End-to-End Object Detection with Transformers]
 
 ## Citation
-
+```bash
 @misc{deguevara2023segmentationbased,
       title={Segmentation-Based Parametric Painting}, 
       author={Manuel Ladron de Guevara and Matthew Fisher and Aaron Hertzmann},
@@ -119,7 +119,7 @@ The method uses various techniques and algorithms to produce a painting from an 
       archivePrefix={arXiv},
       primaryClass={cs.CV},
       }
-
+```
 ## Feedback
 
 For any queries or feedback related to the algorithm, please open an issue on GitHub or contact the authors directly.
