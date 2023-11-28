@@ -4,7 +4,7 @@ This repository contains a semantic-based painting optimization algorithm which 
 
 [Project Website](https://manuelladron.github.io/semantic_based_painting/)
 
-![Reference Image 1](media_readme/paris2_expressionist.jpg)
+![Reference Image 1](docs/static/images/website_teaser.png)
 
 ![Reference Image 2](media_readme/teaser_img.png)
 
