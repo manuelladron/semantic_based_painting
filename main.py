@@ -2,14 +2,17 @@ import time
 import os 
 import argparse 
 import pdb 
+import warnings
+warnings.filterwarnings("ignore")
+import src.style_config as style_config
 from src.painter import Painter 
 
 
 def create_parser():
     parser = argparse.ArgumentParser(description='Stroke Optimization')
 
-    parser.add_argument('--exp_name', type=str, default = 'exp_301')  # exp 134, 135 is GOOD! 
-    parser.add_argument('--style', type=str, default = 'painterly', choices=['realistic', 'painterly', 'abstract', 'expressionist']) # exp 134, 135 is GOOD! 
+    parser.add_argument('--exp_name', type=str, default = 'exp_302_test')  
+    parser.add_argument('--style', type=str, default = 'expressionist', choices=['realistic', 'painterly', 'abstract', 'expressionist']) 
 
     # strategy settings
     parser.add_argument('--brush_type', type=str, default='curved', choices=['straight', 'curved'])
@@ -78,49 +81,11 @@ def define_styles(style, args):
     args.brush_sizes = [0.8, 0.4, 0.2, 0.05] # Same for every style | [0.8, 0.4, 0.2, 0.1] in the paper 
     args.iter_steps = [300, 300, 300, 300] 
     
-    # Realism 
-    if style == 'realistic':
-        #args.brush_sizes = [0.8, 0.7, 0.7, 0.6]
-        args.budgets= [9, 49, 64, 81] # [9, 49, 64, 81]  # abstracted [9, 9, 49]   # painterly [9, 16, 16, 9]  # realistic  [9, 9, 49, 64] # hyperrealistic [9,49,64,81]
-        args.number_natural_patches = [40, 60, 60]
-        args.patch_strategy_detail = 'uniform'
-        args.use_segmentation_mask = False
-        args.filter_strokes = False
-        args.return_segmented_areas = False
-   
-    # Abstract 
-    elif style == 'abstract':
-        args.budgets=[9, 16, 16, 9]
-        args.number_natural_patches = [25, 25, 50] # [25, 30, 60]
-        args.patch_strategy_detail = 'natural'
-        args.use_segmentation_mask = True
-        args.filter_strokes = True
-        args.return_segmented_areas = True
-        args.start_using_masks = 1
-        args.start_natural_level = 0
-        
-    # Expressionist
-    elif style == 'expressionist':
-        args.iter_steps = [500, 500] 
-        args.brush_sizes = [0.8, 0.8]
-        args.budgets=[9, 9]
-        args.number_natural_patches = [9] # [25, 30, 60]
-        args.patch_strategy_detail = 'natural'
-        args.use_segmentation_mask = False
-        args.filter_strokes = False
-        args.return_segmented_areas = False
-        args.start_using_masks = -1
-        args.start_natural_level = 1
+    # Get style-specific settings
+    style_params = style_config.style_parameters.get(style, {})
 
-    # Painterly 
-    else:
-        args.budgets=[9, 16, 16, 9] # [9, 16, 16, 9]
-        args.number_natural_patches = [25, 25, 25] # [25, 30, 60] | [25, 25, 50]
-        args.patch_strategy_detail = 'natural'
-        args.use_segmentation_mask = True
-        args.filter_strokes = True
-        args.return_segmented_areas = True
-
+    for key, value in style_params.items():
+        setattr(args, key, value)
     return args
 
 
