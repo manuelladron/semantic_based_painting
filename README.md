@@ -68,7 +68,8 @@ python main.py [options]
 - `--texturize`: Use texturize feature (default: True)
 ... and many more. (For a full list of arguments and their defaults, refer to the `main.py` file)
 
-To paint with a painterly style set style to "painterly". To get a realistic style, set it to "realistic"
+To paint with a painterly style set style to "painterly". To get a realistic style, set it to "realistic". Currently supports 4 styles: realistic, painterly, abstract, and expressionist. 
+
 - `--style`
 
 ### 4. Example:
