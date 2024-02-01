@@ -351,11 +351,17 @@ def texturizer(painter, writer, stroke_param, canvas_size, patch, time, level, s
     :return: 
     """
     #print(f'segm_name: {segm_name}')
-    if segm_name == 'sky' or level == 0:
-        t1 = '../../painting_tools/brushes/noshape_light.png' # '../../painting_tools/brushes/noshape_light_more.png'
-    else:
-        t1 = '../../painting_tools/brushes/noshape.png' # noshape_light.png
+    # if segm_name == 'sky' or level == 0:
+    #     t1 = '../../painting_tools/brushes/noshape_light.png' # '../../painting_tools/brushes/noshape_light_more.png'
+    # else:
+    #     t1 = '../../painting_tools/brushes/noshape.png' # noshape_light.png
     
+
+    if segm_name == 'sky' or level == 0:
+        t1 = 'brushes/noshape_light.png' # '../../painting_tools/brushes/noshape_light_more.png'
+    else:
+        t1 = 'brushes/noshape.png' # noshape_light.png
+
     # t1 = '../painting_tools/brushes/brush_large_vertical_clean2.png'
     # t2 = '../painting_tools/brushes/acrylic_w2.png'
     # t3 = '../painting_tools/brushes/oil_bump.png'
