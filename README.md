@@ -47,11 +47,31 @@ The algorithm aims to efficiently optimize a collection of stroke parameters to 
 ### 1. Requirements:
 
 - Python 3.6 or later
-- Install the required packages from `requirements.txt` using the following command:
+- Install the required packages from `requirements.txt` using the following command (if using Ubuntu):
 
 ```bash
 pip install -r requirements.txt
 ```
+
+- For Mac OS with new M chip (takes 1.55 times longer than using an Nvidia A6000 GPU):
+
+```bash
+pip install -r requirements_os.txt
+```
+
+- If using Mac OS replace in utils files and painter.py file the following:
+```bash
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+```
+By:
+```bash
+# device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") # 
+device = "mps" if torch.backends.mps.is_available() else "cpu"
+# Set default tensor type to float32
+torch.set_default_dtype(torch.float32)
+```
+
+You will likely need to add some .float() at some parts in the code
 
 - Download the renderer and perceptual network [here](https://drive.google.com/drive/folders/1f1dMbU5Yj9T-lGq0ZTc1MPPPJ-R7v0YX?usp=sharing) and store them in a folder under the main directory. *Update: also provided in folder model_checkpoints.
 

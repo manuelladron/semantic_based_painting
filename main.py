@@ -11,7 +11,7 @@ from src.painter import Painter
 def create_parser():
     parser = argparse.ArgumentParser(description='Stroke Optimization')
 
-    parser.add_argument('--exp_name', type=str, default = 'exp_319')  
+    parser.add_argument('--exp_name', type=str, default = 'exp_320')  
     parser.add_argument('--style', type=str, default = 'expressionist', choices=['realistic', 'painterly', 'abstract', 'expressionist']) 
 
     # strategy settings
@@ -37,11 +37,11 @@ def create_parser():
     # misc settings 
     parser.add_argument('--upsample', type=bool, default = True)
     parser.add_argument('--aspect_ratio_downsample', type=float, default=3)
-    parser.add_argument('--image_path', type=str, default = '../images/cities/cordoba3_c.png') 
+    parser.add_argument('--image_path', type=str, default = 'images/paris2.jpeg') 
     
     parser.add_argument('--save_dir', type=str, default = './results')
     parser.add_argument('--canvas_size', type=int, default=128)
-    parser.add_argument('--canvas_color', type=str, default = 'white', choices=['back', 'white'])
+    parser.add_argument('--canvas_color', type=str, default = 'black', choices=['back', 'white'])
 
     # Renderer settings 
     parser.add_argument('--renderer_ckpt_path', type=str, default = './model_checkpoints/renderer.pkl')
