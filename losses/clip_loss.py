@@ -8,7 +8,10 @@ import numpy as np
 import torch
 from utils import utils
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") # 
+device = "mps" if torch.backends.mps.is_available() else "cpu"
+# Set default tensor type to float32
+torch.set_default_dtype(torch.float32)
 
 
 # Some big pretrained models here

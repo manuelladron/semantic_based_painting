@@ -13,10 +13,14 @@ import src.optimization as opt
 import torch.nn.functional as F
 from utils import stroke_initialization as SI
 from utils import filter_utils as FU
+import gc  # For memory management
 
 
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") # 
+device = "mps" if torch.backends.mps.is_available() else "cpu"
+# Set default tensor type to float32
+torch.set_default_dtype(torch.float32)
 print(f'device: {device}')
 
 class Painter():
@@ -37,7 +41,7 @@ class Painter():
     
         # Create dictionary that maps ids to names 
         if args.use_segmentation_mask:
-            categories_json = '/home/manuelladron/projects/npp/stroke_opt_main/stroke_opt_23/utils/coco_panoptic_cat.json'
+            categories_json = 'utils/coco_panoptic_cat.json'
             with open(categories_json) as f:
                 categories = json.load(f)
             
@@ -59,7 +63,7 @@ class Painter():
             self.black_canvas = torch.zeros_like(self.general_canvas).to(device)
 
         # Get perceptual network 
-        self.perc = Vgg16_Extractor(space='uniform', device=device).double()
+        self.perc = Vgg16_Extractor(space='uniform', device=device).float()
 
         if args.brush_type == 'curved':
             self.num_params = 13
@@ -115,10 +119,10 @@ class Painter():
         
         # Create canvas 
         if self.args.canvas_color == 'black':
-            canvas = torch.zeros_like(src_img).to(device) # [1, 3, H, W]
+            canvas = torch.zeros_like(src_img).float().to(device) # [1, 3, H, W]
 
         elif self.args.canvas_color == 'white':
-            canvas = torch.ones_like(src_img).to(device)  # [1, 3, H, W]
+            canvas = torch.ones_like(src_img).float().to(device)  # [1, 3, H, W]
 
         # Get patches and patches' boundaries 
         if self.args.paint_by_patches:
@@ -178,9 +182,9 @@ class Painter():
             print(f'Total patches collected: {len(self.patches_limits)}')
             print(f'Patches height: {npatches_h}, patches width: {npatches_w}')
         if style_img == None:
-            return src_img.to(device), canvas, mask, None
+            return src_img.float().to(device), canvas, mask, None
         else:
-            return src_img.to(device), canvas, mask, style_img.to(device)
+            return src_img.float().to(device), canvas, mask, style_img.float().to(device)
 
     def compute_loss(self, canvas, target_patches, use_clip=False):
         """
@@ -217,6 +221,61 @@ class Painter():
             clip_loss = CL.get_clip_loss(self.args, self.args.style_prompt, canvas, target_patches, use_patch_loss=True)
             return clip_loss
 
+    def filter_patches_by_error(self, patches, patches_limits, mask_patches_list, level):
+        """
+        Filter patches based on error threshold to focus on areas that need refinement
+        """
+        if not hasattr(self, 'general_canvas') or self.general_canvas is None:
+            return patches, patches_limits, mask_patches_list
+            
+        # Calculate error threshold based on level (more aggressive at finer levels)
+        error_thresholds = [0.15, 0.1, 0.05, 0.02]  # For levels 0, 1, 2, 3
+        threshold = error_thresholds[min(level, len(error_thresholds)-1)]
+        
+        # Compute current canvas patches
+        current_patches = []
+        for i, patch_limit in enumerate(patches_limits):
+            if len(patch_limit) == 4:
+                h_start, h_end, w_start, w_end = patch_limit
+            elif len(patch_limit) == 2:
+                (h_start, h_end), (w_start, w_end) = patch_limit
+            else:
+                continue
+                
+            patch = self.general_canvas[:, :, h_start:h_end, w_start:w_end]
+            if patch.shape[2] == 128 and patch.shape[3] == 128:  # Ensure correct size
+                current_patches.append(patch)
+        
+        if not current_patches:
+            return patches, patches_limits, mask_patches_list
+            
+        current_patches = torch.cat(current_patches, dim=0)
+        
+        # Compute L1 error for each patch
+        if len(current_patches) == len(patches):
+            errors = torch.mean(torch.abs(patches - current_patches), dim=(1, 2, 3))
+            
+            # Filter patches above threshold
+            high_error_mask = errors > threshold
+            
+            if high_error_mask.sum() > 0:
+                filtered_patches = patches[high_error_mask]
+                filtered_limits = [patches_limits[i] for i in range(len(patches_limits)) if high_error_mask[i]]
+                
+                # Filter corresponding masks
+                filtered_masks = []
+                for mask_list in mask_patches_list:
+                    if len(mask_list) == len(patches):
+                        filtered_mask = mask_list[high_error_mask]
+                        filtered_masks.append(filtered_mask)
+                    else:
+                        filtered_masks.append(mask_list)
+                
+                print(f"Level {level}: Filtered {len(filtered_patches)}/{len(patches)} patches (threshold: {threshold:.3f})")
+                return filtered_patches, filtered_limits, filtered_masks
+        
+        return patches, patches_limits, mask_patches_list
+
     def get_reference_patches(self, mode, level, number_natural_patches):
         
         """Crops patches from source image according to the given mode: 
@@ -232,20 +291,26 @@ class Painter():
         if mode == 'uniform':
             
             if self.args.use_segmentation_contours:
-                boundaries_patches = torch.cat(self.segm_boundaries_patches, dim=0).to(device)
+                boundaries_patches = torch.cat(self.segm_boundaries_patches, dim=0).float().to(device)
 
             ## Iterate over segmentation binary masks and reutrn a list of patches of length number of segmentation masks 
             if self.args.use_segmentation_mask: 
                 mask_patches_list = []
                 for i in range(len(self.list_binary_mask_patches)): # this is a list of length number of segemntation masks. Each element in list is another list with a bunch of patches that build up the mask 
                     mask_patches = self.list_binary_mask_patches[i]
-                    mask_patches = torch.cat(mask_patches, dim=0).to(device)
+                    mask_patches = torch.cat(mask_patches, dim=0).float().to(device)
                     mask_patches_list.append(mask_patches)
 
             if self.args.style_transfer:
-                style_patches = torch.cat(self.style_patches, dim=0).to(device)
+                style_patches = torch.cat(self.style_patches, dim=0).float().to(device)
             
-            return torch.cat(self.patches, dim=0).to(device), self.patches_limits, 0, 0, mask_patches_list, boundaries_patches, style_patches # [npatches, 3, 128, 128] <- self.patches is a list with [3, 128, 128] patches 
+            # Aggressive patch filtering based on error threshold
+            patches_tensor = torch.cat(self.patches, dim=0).float().to(device)
+            filtered_patches, filtered_limits, filtered_masks = self.filter_patches_by_error(
+                patches_tensor, self.patches_limits, mask_patches_list, level
+            )
+            
+            return filtered_patches, filtered_limits, 0, 0, filtered_masks, boundaries_patches, style_patches 
         
         # Compute natural patches 
         else:
@@ -563,7 +628,7 @@ class Painter():
                     
                     if mode == 'uniform':
                         # selects only the masks that correspond to **this** segmentation part. 
-                        mask = torch.cat(mask, dim=0).to(device) # [N, 3, 128, 128]
+                        mask = torch.cat(mask, dim=0).float().to(device) # [N, 3, 128, 128]
                         mask = torch.index_select(mask, 0, torch.Tensor(mask_indices).int().to(device)) # [M, 1, 128, 128] M << N (patches where the mask is present)
 
                     # Filter out strokes that aren't in mask. This is nothing to do with canvases 
@@ -1124,11 +1189,18 @@ class Painter():
             end = time.time()
             
             print(f'\n-----Level {k} time: {(end-st)/60} minutes------\n')
+            
+            # Memory cleanup after each level
+            if device == "mps":
+                torch.mps.empty_cache()
+            elif torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+            # Explicit garbage collection
+            gc.collect()
             learned_strokes = strokes
             strokes_list.append(strokes)
             all_patches_limits.append(self.patches_limits)
-
-            torch.cuda.empty_cache()
 
             # Calculate distribution of strokes and 
 

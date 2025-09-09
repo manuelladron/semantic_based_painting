@@ -10,10 +10,14 @@ from losses import clip_loss as CL
 from losses import loss_utils
 from style_transfer import st_model
 import torch.nn.functional as F
+import gc  # For memory management
 
 
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") # 
+device = "mps" if torch.backends.mps.is_available() else "cpu"
+# Set default tensor type to float32
+torch.set_default_dtype(torch.float32)
 
 def optimization_loop(args, src_img, opt_steps, target_patches, prev_canvas, strokes, budget, 
                         brush_size, patches_limits, npatches_w, level, mode, general_canvas, 
@@ -29,14 +33,79 @@ def optimization_loop(args, src_img, opt_steps, target_patches, prev_canvas, str
     :param optimizer: pytorch optimizer 
     """
     
+    # Early termination variables
+    best_loss = float('inf')
+    early_stop_counter = 0
+    early_stop_patience = 20
+    loss_improvement_threshold = 0.999
+    
+    # Mixed precision scaler for MPS
+    use_mixed_precision = hasattr(args, 'use_mixed_precision') and args.use_mixed_precision
+    scaler = torch.cuda.amp.GradScaler() if use_mixed_precision and device != "mps" else None
+    
+    # Batch processing parameters (disabled for now due to rendering compatibility)
+    batch_size = len(target_patches)  # Process all patches together
+    num_patches = len(target_patches)
+    
+    print(f"Processing {num_patches} patches with optimizations enabled")
+    
     # Optimization loop             
     for i in range(opt_steps):
         
         # Reset canvas at each iteration: Get previous canvas as canvas 
-        canvas = prev_canvas # [N, C, H, W]
+        canvas = prev_canvas.clone() # [N, C, H, W]
         
-        # Get painting (this is by patches) with the strokes being optimized
-        canvas, canvases_seq, strokes_seq = utils.render(canvas, strokes, budget, brush_size, renderer, num_params, use_transp=use_transp)
+        # Batch processing for memory efficiency (currently disabled)
+        if False:  # num_patches > batch_size:
+            # Process in batches
+            total_loss = 0.0
+            total_l1_loss = 0.0 
+            total_perc_loss = 0.0
+            
+            for batch_idx in range(0, num_patches, batch_size):
+                end_idx = min(batch_idx + batch_size, num_patches)
+                
+                # Get batch slices
+                canvas_batch = canvas[batch_idx:end_idx]
+                strokes_batch = strokes[batch_idx:end_idx] 
+                target_batch = target_patches[batch_idx:end_idx]
+                
+                # Mixed precision forward pass
+                if use_mixed_precision and device != "mps":
+                    with torch.cuda.amp.autocast():
+                        canvas_batch, _, _ = utils.render(canvas_batch, strokes_batch, budget, brush_size, renderer, num_params, use_transp=use_transp)
+                        batch_loss, batch_l1, batch_perc = loss_utils.compute_loss(args, perc_net, canvas_batch, target_batch, use_clip=False)
+                else:
+                    # Regular precision
+                    canvas_batch, _, _ = utils.render(canvas_batch, strokes_batch, budget, brush_size, renderer, num_params, use_transp=use_transp)
+                    batch_loss, batch_l1, batch_perc = loss_utils.compute_loss(args, perc_net, canvas_batch, target_batch, use_clip=False)
+                
+                # Accumulate losses
+                total_loss += batch_loss * (end_idx - batch_idx) / num_patches
+                total_l1_loss += batch_l1 * (end_idx - batch_idx) / num_patches  
+                total_perc_loss += batch_perc * (end_idx - batch_idx) / num_patches
+                
+                # Update canvas
+                canvas[batch_idx:end_idx] = canvas_batch
+                
+                # Memory cleanup for batch
+                del canvas_batch, strokes_batch, target_batch, batch_loss, batch_l1, batch_perc
+                if device == "mps":
+                    torch.mps.empty_cache()
+                elif torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                gc.collect()
+            
+            loss = total_loss
+            l1_loss = total_l1_loss
+            perc_loss = total_perc_loss
+        else:
+            # Original processing for small number of patches
+            if use_mixed_precision and device != "mps":
+                with torch.cuda.amp.autocast():
+                    canvas, canvases_seq, strokes_seq = utils.render(canvas, strokes, budget, brush_size, renderer, num_params, use_transp=use_transp)
+            else:
+                canvas, canvases_seq, strokes_seq = utils.render(canvas, strokes, budget, brush_size, renderer, num_params, use_transp=use_transp)
 
         # If using global loss, get a smaller size general canvas and source image to compute loss later
         if args.global_loss or opt_style:
@@ -70,33 +139,68 @@ def optimization_loop(args, src_img, opt_steps, target_patches, prev_canvas, str
         # if i == (opt_steps - 1): # for gif 
         #     canvas, canvases_seq, strokes_seq = utils.render(canvas, strokes, budget, brush_size, renderer, num_params, use_transp=use_transp)
 
-        # Compute loss and optimize 
-        if opt_style == False:
-            loss, l1_loss, perc_loss = loss_utils.compute_loss(args, perc_net, canvas, target_patches, use_clip=False)
-            # length_loss = loss_utils.control_point_distance_loss(strokes, beta=0.1)
-            # length_loss = loss_utils.differentiable_bezier_loss_batch(strokes, radius=0.1)
-            #loss += length_loss 
-        
-        # Increasing lambdas for content clip loss 
-        else:
-            if level == 0 or level == 1:
-                args.content_lambda = 10
-            elif level == 2:
-                args.content_lambda = 50
-            elif level == 3:
-                args.content_lambda = 80
-            elif level == 4: 
-                args.content_lambda = 150
+        # Compute loss and optimize (only if not already computed in batch processing)
+        if num_patches <= batch_size:
+            if opt_style == False:
+                if use_mixed_precision and device != "mps":
+                    with torch.cuda.amp.autocast():
+                        loss, l1_loss, perc_loss = loss_utils.compute_loss(args, perc_net, canvas, target_patches, use_clip=False)
+                else:
+                    loss, l1_loss, perc_loss = loss_utils.compute_loss(args, perc_net, canvas, target_patches, use_clip=False)
+            else:
+                # Increasing lambdas for content clip loss 
+                if level == 0 or level == 1:
+                    args.content_lambda = 10
+                elif level == 2:
+                    args.content_lambda = 50
+                elif level == 3:
+                    args.content_lambda = 80
+                elif level == 4: 
+                    args.content_lambda = 150
 
-            loss = loss_utils.compute_loss(args, perc_net, general_canvas_dec, source_img_dec, use_clip=True)
+                if use_mixed_precision and device != "mps":
+                    with torch.cuda.amp.autocast():
+                        loss = loss_utils.compute_loss(args, perc_net, general_canvas_dec, source_img_dec, use_clip=True)
+                else:
+                    loss = loss_utils.compute_loss(args, perc_net, general_canvas_dec, source_img_dec, use_clip=True)
+            
+            # Compute global loss 
+            if args.global_loss:
+                if use_mixed_precision and device != "mps":
+                    with torch.cuda.amp.autocast():
+                        loss, l1_loss, perc_loss = loss_utils.compute_loss(args, perc_net, general_canvas_dec, source_img_dec, use_clip=False)
+                else:
+                    loss, l1_loss, perc_loss = loss_utils.compute_loss(args, perc_net, general_canvas_dec, source_img_dec, use_clip=False)
         
-        # Compute global loss 
-        if args.global_loss:
-            loss, l1_loss, perc_loss = loss_utils.compute_loss(args, perc_net, general_canvas_dec, source_img_dec, use_clip=False)
+        # Early termination check
+        current_loss = loss.item()
+        if current_loss < best_loss * loss_improvement_threshold:
+            best_loss = current_loss
+            early_stop_counter = 0
+        else:
+            early_stop_counter += 1
+            
+        if early_stop_counter >= early_stop_patience:
+            print(f"Early termination at iteration {i}/{opt_steps} (loss plateaued)")
+            break
         
+        # Mixed precision backward pass
         optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        if use_mixed_precision and device != "mps" and scaler is not None:
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()
+            
+        # Memory cleanup after each iteration
+        if i % 10 == 0:  # Clean up every 10 iterations
+            if device == "mps":
+                torch.mps.empty_cache()
+            elif torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
 
         # Add to logger 
         if i % 50 == 0:
