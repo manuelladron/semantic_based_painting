@@ -1,2 +1,4 @@
 results/
 stroke_distribution.py
+venv/
+__pycache__/

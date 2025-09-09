@@ -41,7 +41,7 @@ def create_parser():
     
     parser.add_argument('--save_dir', type=str, default = './results')
     parser.add_argument('--canvas_size', type=int, default=128)
-    parser.add_argument('--canvas_color', type=str, default = 'black', choices=['back', 'white'])
+    parser.add_argument('--canvas_color', type=str, default='black', choices=['black', 'white'])
 
     # Renderer settings 
     parser.add_argument('--renderer_ckpt_path', type=str, default = './model_checkpoints/renderer.pkl')

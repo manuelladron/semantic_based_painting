@@ -6,20 +6,35 @@ import torch.nn.functional as F
 import torchvision.utils
 import numpy as np
 import torch
-from utils import utils 
+from utils import utils
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
-# Some big pretrained models here 
-clip_model, preprocess = clip.load("ViT-B/32", device=device, jit=False)
-clip.model.convert_weights(clip_model)
+# Some big pretrained models here
+_clip_model = None
+_preprocess = None
 
-VGG = models.vgg19(pretrained=True).features
-VGG.to(device)
 
-for parameter in VGG.parameters():
-	parameter.requires_grad_(False)
+def _load_clip_model():
+    """Lazily load the CLIP model to avoid network calls at import time."""
+    global _clip_model, _preprocess
+    if _clip_model is None:
+        _clip_model, _preprocess = clip.load("ViT-B/32", device=device, jit=False)
+        clip.model.convert_weights(_clip_model)
+    return _clip_model, _preprocess
+
+_VGG = None
+
+
+def _load_vgg():
+    """Lazily load VGG19 features to avoid network downloads at import time."""
+    global _VGG
+    if _VGG is None:
+        _VGG = models.vgg19(pretrained=True).features.to(device)
+        for parameter in _VGG.parameters():
+            parameter.requires_grad_(False)
+    return _VGG
 
 def get_image_prior_losses(inputs_jit):
 	diff1 = inputs_jit[:, :, :, :-1] - inputs_jit[:, :, :, 1:]
@@ -130,14 +145,15 @@ def encode_style_prompt_clip(style_prompt):
     source = 'a Photo'
     target = style_prompt #'Starry Night by Vincent Van Gogh'
     
+    clip_model, _ = _load_clip_model()
     with torch.no_grad():
-        # source 
+        # source
         template_source = compose_text_with_templates(source, imagenet_templates)
         tokens_source = clip.tokenize(template_source).to(device)
         text_source_features = clip_model.encode_text(tokens_source).detach().mean(0, keepdim=True)
         text_source_features /= text_source_features.norm(dim=-1, keepdim=True)
 
-        #target
+        # target
         template_target = compose_text_with_templates(target, imagenet_templates)
         tokens_target = clip.tokenize(template_target).to(device)
         text_target_features = clip_model.encode_text(tokens_target).detach().mean(0, keepdim=True)
@@ -150,6 +166,7 @@ def encode_image_clip(image):
     """
     Encodes image and returns CLIP features 
     """
+    clip_model, _ = _load_clip_model()
     source_features = clip_model.encode_image(clip_normalize(image, device))
     source_features /= (source_features.clone().norm(dim=-1, keepdim=True))
     
@@ -184,6 +201,7 @@ def compute_clipstyle_loss(source_image, painting, text_source_features, text_ta
             img_proc.append(target_crop)
 
         img_aug = torch.cat(img_proc, dim=0)
+        clip_model, _ = _load_clip_model()
         image_features = clip_model.encode_image(clip_normalize(img_aug, device))
         image_features /= (image_features.clone().norm(dim=-1, keepdim=True))
 
@@ -204,8 +222,9 @@ def compute_clipstyle_loss(source_image, painting, text_source_features, text_ta
 def get_clip_loss(args, style_prompt, canvas, target_image, use_patch_loss):
     loss = 0
     if args.content_lambda > 0:
-        content_features = get_features(img_normalize(canvas.float()), VGG)
-        target_features = get_features(img_normalize(target_image.float()), VGG)
+        vgg = _load_vgg()
+        content_features = get_features(img_normalize(canvas.float()), vgg)
+        target_features = get_features(img_normalize(target_image.float()), vgg)
         
         content_loss = 0
         content_loss += torch.mean((target_features['conv4_2'] - content_features['conv4_2']) ** 2)
