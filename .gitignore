@@ -2,3 +2,4 @@ results/
 stroke_distribution.py
 venv/
 __pycache__/
+painting_env/
