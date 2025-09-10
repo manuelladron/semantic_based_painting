@@ -21,8 +21,32 @@ import seaborn as sns
 import math 
 from scipy.integrate import quad
 from scipy.interpolate import interp1d
+import gc  # For memory management
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") # 
+# device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") # 
+device = "mps" if torch.backends.mps.is_available() else "cpu"
+# Set default tensor type to float32
+torch.set_default_dtype(torch.float32)
+
+def cleanup_memory(verbose=False):
+    """
+    Comprehensive memory cleanup function
+    """
+    # Clear Python garbage collection
+    gc.collect()
+    
+    # Clear PyTorch cache based on device
+    if device == "mps":
+        torch.mps.empty_cache()
+        if verbose:
+            print("Cleared MPS cache")
+    elif torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        if verbose:
+            print("Cleared CUDA cache")
+    
+    if verbose:
+        print("Memory cleanup completed") 
 
 def save_img(image, dirpath, img_name):
     img_name_complete = os.path.join(dirpath, img_name)
@@ -122,7 +146,7 @@ def resize_segmentation_mask(mask, height, width):
     return resized_mask
 
 def map_segmentation_mask_to_colors(mask):
-    categories_json = '/home/manuelladron/projects/npp/stroke_opt_main/stroke_opt_23/utils/coco_panoptic_cat.json'
+    categories_json = 'utils/coco_panoptic_cat.json'
     
     with open(categories_json) as f:
         categories = json.load(f)
@@ -183,6 +207,16 @@ def process_img(args, img_path, writer, style_img_path=None, resize_value=128, m
     src_img = cv2.imread(img_path, cv2.IMREAD_COLOR)[:,:,::-1] # from BGR to RGB uint8 [H,W,3]
     print(f'Original image size H={src_img.shape[0]} x W={src_img.shape[1]}')
     
+    # Apply image resize factor if specified
+    image_was_resized = False
+    if hasattr(args, 'image_resize_factor') and args.image_resize_factor != 1.0:
+        original_h, original_w = src_img.shape[0], src_img.shape[1]
+        new_h = int(original_h * args.image_resize_factor)
+        new_w = int(original_w * args.image_resize_factor)
+        src_img = cv2.resize(src_img, (new_w, new_h))
+        image_was_resized = True
+        print(f'Resized image by factor {args.image_resize_factor}: H={new_h} x W={new_w}')
+    
     new_h, new_w = src_img.shape[0], src_img.shape[1]
     style_img = None # to return 
     
@@ -214,15 +248,18 @@ def process_img(args, img_path, writer, style_img_path=None, resize_value=128, m
                 new_h = src_img.shape[0]
                 new_w = src_img.shape[1]
 
-        elif args.upsample and (new_h < min_width or new_w < min_width): # Adjust it to be at least over 1000 pixels so the painting is not too small 
-            print('upsampling ...')
+        elif args.upsample and not image_was_resized and (new_h < getattr(args, 'min_image_size', min_width) or new_w < getattr(args, 'min_image_size', min_width)): # Adjust it to be at least over min_image_size pixels so the painting is not too small 
+            min_size = getattr(args, 'min_image_size', min_width)
+            print(f'upsampling to minimum size {min_size}...')
             if src_img.shape[0] >= src_img.shape[1]:
-                src_img = image_resize(src_img, height=min_width)
+                src_img = image_resize(src_img, height=min_size)
             else:
-                src_img = image_resize(src_img, width=min_width)
+                src_img = image_resize(src_img, width=min_size)
 
             new_h = src_img.shape[0]
             new_w = src_img.shape[1]
+        elif image_was_resized and args.upsample:
+            print(f'Skipping upsampling since image was intentionally resized by factor {args.image_resize_factor}')
         
         else:
             new_h = src_img.shape[0] 
@@ -252,7 +289,7 @@ def process_img(args, img_path, writer, style_img_path=None, resize_value=128, m
     segm_mask_color_with_boundaries = 0
     if args.use_segmentation_mask or args.use_segmentation_contours:
         
-        categories_json = '/home/manuelladron/projects/npp/stroke_opt_main/stroke_opt_23/utils/coco_panoptic_cat.json'
+        categories_json = 'utils/coco_panoptic_cat.json'
         with open(categories_json) as f:
             categories = json.load(f)
         

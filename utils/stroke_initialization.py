@@ -16,7 +16,10 @@ from src.segmentation import segment_image
 from utils import render_utils as RU
 from utils import utils 
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") # 
+device = "mps" if torch.backends.mps.is_available() else "cpu"
+# Set default tensor type to float32
+torch.set_default_dtype(torch.float32)
 
 ####################### For straight brush 
 def generate_random_batch(batch_size):

@@ -17,7 +17,10 @@ from utils import render_utils as RU
 from utils import utils 
 from losses import loss_utils
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") # 
+device = "mps" if torch.backends.mps.is_available() else "cpu"
+# Set default tensor type to float32
+torch.set_default_dtype(torch.float32)
 
 
 def filter_pixelwise(stroke, canvas, brush_size, num_params, renderer, device):
